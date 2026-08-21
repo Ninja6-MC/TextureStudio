@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Build Outputs & Generated Artifacts
+dist/
+cache/
+
+# Creative Vector Master Assets (Authored locally)
+textures/
+
+# Reference Media & Video Footage (Copyrighted trailers, footage, and crops)
+references/
+
+# OS & Editor Artifacts
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+.idea/

@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ninja6 Texture Studio — Multi-Set 3D Engine & Pack Compiler</title>
+  <link rel="stylesheet" href="styles.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="app">
+    <!-- Top Navigation Bar -->
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-logo"></div>
+        <span class="brand-title">Ninja6 <span>Texture Studio</span></span>
+      </div>
+
+      <div class="controls-group">
+        <!-- Multi-Select Sets Dropdown Container -->
+        <div class="control-item multi-select-container" id="multi-set-dropdown-container">
+          <label>Compare Sets (Max 4)</label>
+          <div class="multi-select-trigger" id="multi-select-trigger">
+            <span id="multi-select-label">2 Sets Selected</span>
+            <span class="dropdown-arrow">▼</span>
+          </div>
+          
+          <!-- Dropdown Popup Menu -->
+          <div class="multi-select-menu" id="multi-select-menu">
+            <div class="menu-header">
+              <span>Select 1 to 4 Sets to View:</span>
+            </div>
+            <div class="menu-options" id="multi-select-options">
+              <!-- Dynamically populated checkboxes -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Sync Motion Control -->
+        <div class="control-item" id="sync-motion-container">
+          <button id="btn-sync-motion" class="sync-motion-btn active" title="Synchronize 3D Orbit, Pan and Zoom across all viewports">
+            <span class="sync-icon">🔗</span>
+            <span class="sync-label">Sync Motion: <strong>ON</strong></span>
+          </button>
+        </div>
+
+        <!-- Preview Resolution Selector -->
+        <div class="control-item">
+          <label for="res-select">Preview Res</label>
+          <select id="res-select" class="styled-select">
+            <option value="vector">Vector (Native SVG)</option>
+            <option value="512" selected>512 × 512 (Ultra HD)</option>
+            <option value="256">256 × 256 (High)</option>
+            <option value="128">128 × 128 (Medium)</option>
+            <option value="64">64 × 64 (Vanilla+)</option>
+            <option value="32">32 × 32 (Retro)</option>
+          </select>
+        </div>
+
+        <!-- View Mode (Single Block vs Multiblock Structure) -->
+        <div class="control-item mode-toggle-container">
+          <label>Layout</label>
+          <div class="mode-toggle">
+            <button id="mode-single" class="toggle-btn active" data-mode="single">Single Block</button>
+            <button id="mode-multi" class="toggle-btn" data-mode="multi">Multiblock 3D</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <!-- Live Reload Textures Button -->
+        <button id="btn-reload-textures" class="reload-btn" title="Reload and refresh all 3D textures from disk">
+          <span>🔄</span> Reload Textures
+        </button>
+        <!-- 1-Click Export Pack Button -->
+        <button id="btn-open-export" class="export-pack-btn" title="Compile and Export Minecraft Resource Pack">
+          <span>📦</span> Export Pack
+        </button>
+        <button id="btn-toggle-overlay" class="action-btn active" title="Toggle Multi-Layer Overlays (Grass trims, snow, path rims) vs Base Texture">Overlays: ON</button>
+        <button id="btn-wireframe" class="action-btn" title="Toggle Wireframe">Wireframe</button>
+        <button id="btn-autorotate" class="action-btn" title="Toggle Auto-Rotation">Auto-Rotate</button>
+        <button id="btn-grid" class="action-btn active" title="Toggle Ground Grid">Grid</button>
+      </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="workspace">
+      <!-- Left Sidebar (Lists blocks or multiblock structures) -->
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <h3 id="sidebar-title">Blocks in Set</h3>
+          <span id="item-count" class="badge">0</span>
+        </div>
+        <div id="item-list" class="item-list">
+          <!-- Dynamically populated -->
+        </div>
+
+        <div class="sidebar-footer">
+          <div class="inspector-card">
+            <h4>Inspector</h4>
+            <div id="inspector-details">
+              <p class="meta-row"><span>ID:</span> <strong id="meta-id">-</strong></p>
+              <p class="meta-row"><span>Target:</span> <strong id="meta-name">-</strong></p>
+              <p class="meta-row"><span>Type:</span> <strong id="meta-type">-</strong></p>
+              <p class="meta-row"><span>Tiling:</span> <span id="meta-tiling" class="status-pill">Toroidal OK</span></p>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Dynamic 3D Viewport Grid (Supports 1, 2, 3, or 4 split viewports) -->
+      <section class="viewports-grid layout-2" id="viewports-grid">
+        <!-- Viewport 0 -->
+        <div class="viewport-box" id="viewport-box-0">
+          <div class="viewport-header-tag" id="tag-viewport-0">✨ [N6 Vector] Set 1</div>
+          <div id="canvas-wrapper-0" class="canvas-wrapper"></div>
+          <div class="viewport-hud">
+            <div class="hud-pill">
+              <span class="dot live"></span>
+              <span id="hud-target-0">Target</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Viewport 1 -->
+        <div class="viewport-box" id="viewport-box-1">
+          <div class="viewport-header-tag secondary" id="tag-viewport-1">📦 [Pack] Faithful HD</div>
+          <div id="canvas-wrapper-1" class="canvas-wrapper"></div>
+          <div class="viewport-hud">
+            <div class="hud-pill">
+              <span class="dot comp"></span>
+              <span id="hud-target-1">Target</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Viewport 2 -->
+        <div class="viewport-box" id="viewport-box-2" style="display: none;">
+          <div class="viewport-header-tag tertiary" id="tag-viewport-2">📦 [Vanilla] Default (16x)</div>
+          <div id="canvas-wrapper-2" class="canvas-wrapper"></div>
+          <div class="viewport-hud">
+            <div class="hud-pill">
+              <span class="dot vanilla"></span>
+              <span id="hud-target-2">Target</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Viewport 3 -->
+        <div class="viewport-box" id="viewport-box-3" style="display: none;">
+          <div class="viewport-header-tag quaternary" id="tag-viewport-3">Set 4</div>
+          <div id="canvas-wrapper-3" class="canvas-wrapper"></div>
+          <div class="viewport-hud">
+            <div class="hud-pill">
+              <span class="dot extra"></span>
+              <span id="hud-target-3">Target</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Controls Help Overlay -->
+        <div class="viewport-controls-help">
+          <span id="help-sync-state">🔗 Motion Synced</span>
+          <span>Left Click + Drag: <strong>Orbit</strong></span>
+          <span>Right Click: <strong>Pan</strong></span>
+          <span>Scroll: <strong>Zoom</strong></span>
+        </div>
+      </section>
+    </main>
+
+    <!-- Export Pack Modal Overlay -->
+    <div class="modal-overlay" id="export-modal" style="display: none;">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div class="modal-title-wrap">
+            <span class="modal-icon">📦</span>
+            <h3>Compile & Export Minecraft Resource Pack</h3>
+          </div>
+          <button id="btn-close-modal" class="modal-close-btn">&times;</button>
+        </div>
+
+        <div class="modal-body">
+          <p class="modal-desc">
+            Compiles master vector (<code class="code-inline">.svg</code>) assets into a production-ready, multi-version Minecraft <code class="code-inline">.zip</code> resource pack (1.20 through 1.21.4+ compatible).
+          </p>
+
+          <div class="form-group">
+            <label>Select Target Export Resolution:</label>
+            <div class="res-chips-grid">
+              <label class="res-chip active">
+                <input type="radio" name="export-res" value="512" checked>
+                <div class="chip-content">
+                  <strong>512 × 512</strong>
+                  <span>Ultra HD (Master)</span>
+                </div>
+              </label>
+              <label class="res-chip">
+                <input type="radio" name="export-res" value="256">
+                <div class="chip-content">
+                  <strong>256 × 256</strong>
+                  <span>High Detail</span>
+                </div>
+              </label>
+              <label class="res-chip">
+                <input type="radio" name="export-res" value="128">
+                <div class="chip-content">
+                  <strong>128 × 128</strong>
+                  <span>Balanced</span>
+                </div>
+              </label>
+              <label class="res-chip">
+                <input type="radio" name="export-res" value="64">
+                <div class="chip-content">
+                  <strong>64 × 64</strong>
+                  <span>Vanilla+</span>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <div id="export-status-box" class="status-box" style="display: none;">
+            <div class="status-indicator">
+              <span class="spinner"></span>
+              <span id="status-text">Compiling textures...</span>
+            </div>
+            <div id="status-meta" class="status-meta" style="display: none;">
+              <p><span>File:</span> <strong id="out-filename">-</strong></p>
+              <p><span>Size:</span> <strong id="out-filesize">-</strong></p>
+              <p><span>SHA-1:</span> <code id="out-sha1">-</code></p>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button id="btn-cancel-export" class="action-btn">Cancel</button>
+          <button id="btn-do-compile" class="primary-btn">
+            <span>⚡</span> Build & Download .ZIP
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+{
+  "name": "@ninja6-mc/texture-studio",
+  "version": "1.0.0-alpha.1",
+  "description": "Zero-dependency vector texture design studio and multi-resolution Minecraft resource pack compiler.",
+  "type": "module",
+  "main": "tools/server.mjs",
+  "scripts": {
+    "start": "node tools/server.mjs",
+    "build": "node tools/build-pack.mjs --res 512",
+    "build:256": "node tools/build-pack.mjs --res 256",
+    "build:128": "node tools/build-pack.mjs --res 128",
+    "build:64": "node tools/build-pack.mjs --res 64",
+    "build:32": "node tools/build-pack.mjs --res 32",
+    "build:all": "node tools/build-pack.mjs --all"
+  },
+  "keywords": [
+    "minecraft",
+    "texture-pack",
+    "resource-pack",
+    "vector",
+    "svg",
+    "threejs",
+    "studio",
+    "resvg",
+    "ninja6"
+  ],
+  "author": "Ninja6-MC",
+  "license": "GPL-3.0",
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "three": "^0.170.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
