@@ -43,8 +43,8 @@ Texture Studio is a local web application and CLI compiler built for authoring, 
 
 ```bash
 # Clone the repository
-git clone https://github.com/Ninja6-MC/texture-studio.git
-cd texture-studio
+git clone https://github.com/Ninja6-MC/TextureStudio.git
+cd TextureStudio
 
 # Install dependencies
 npm install
