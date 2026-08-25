@@ -1,21 +1,41 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import { Resvg } from "@resvg/resvg-js";
+
+const require = createRequire(import.meta.url);
+const archiver = require("archiver");
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.resolve(__dirname, "..");
-const TEXTURES_DIR = path.join(ROOT_DIR, "textures");
 const DIST_DIR = path.join(ROOT_DIR, "dist");
-const ZIP_SCRIPT = path.join(__dirname, "zip.ps1");
+
+/**
+ * Creates a clean POSIX zip archive using pure Node.js (cross-platform Linux/Win/macOS)
+ */
+function createZipArchive(sourceDir, outPath) {
+  return new Promise((resolve, reject) => {
+    const output = fs.createWriteStream(outPath);
+    const archive = new archiver.ZipArchive({
+      zlib: { level: 9 }
+    });
+
+    output.on("close", () => resolve());
+    archive.on("error", (err) => reject(err));
+
+    archive.pipe(output);
+    archive.directory(sourceDir, false);
+    archive.finalize();
+  });
+}
 
 /**
  * Main Resource Pack Compiler
  */
-export function buildResourcePack(targetRes = 512, customTexturesDir = null) {
+export async function buildResourcePack(targetRes = 512, customTexturesDir = null) {
   let activeTexturesDir = customTexturesDir ? path.resolve(customTexturesDir) : path.join(ROOT_DIR, "textures");
   if (!fs.existsSync(activeTexturesDir) || fs.readdirSync(activeTexturesDir).length === 0) {
     const siblingKeyframe = path.resolve(ROOT_DIR, "..", "Keyframe", "textures");
@@ -86,13 +106,13 @@ export function buildResourcePack(targetRes = 512, customTexturesDir = null) {
     const isItem = ITEM_IDS.has(stem);
     const targetDir = isItem ? ITEMS_DIR : BLOCKS_DIR;
     const destPng = path.join(targetDir, `${stem}.png`);
-    const srcSvg = path.join(TEXTURES_DIR, svgFile);
+    const srcSvg = path.join(activeTexturesDir, svgFile);
 
     rasterize(srcSvg, destPng, targetRes);
     console.log(`  ✓ ${isItem ? "item" : "block"}/${stem}.png`);
   }
 
-  // 3. Generate un-rotated Blockstates (locks texture direction uniformly, like Bare Bones)
+  // 3. Generate un-rotated Blockstates
   const BLOCKSTATES_DIR = path.join(BUILD_TMP, "assets", "minecraft", "blockstates");
   fs.mkdirSync(BLOCKSTATES_DIR, { recursive: true });
 
@@ -118,13 +138,13 @@ export function buildResourcePack(targetRes = 512, customTexturesDir = null) {
 
   // 4. Generate pack.png (128x128 pack icon)
   const packIconDest = path.join(BUILD_TMP, "pack.png");
-  const grassTopSvg = path.join(TEXTURES_DIR, "grass_block_top.svg");
+  const grassTopSvg = path.join(activeTexturesDir, "grass_block_top.svg");
   if (fs.existsSync(grassTopSvg)) {
     rasterize(grassTopSvg, packIconDest, 128);
   }
   console.log(`[4/5] Generated pack.png (128×128 icon)`);
 
-  // 4. Package into clean Minecraft-compliant .ZIP with strict POSIX '/' separators
+  // 5. Package into clean Minecraft-compliant .ZIP (pure Node.js archiver)
   const zipFileName = `Keyframe-${targetRes}x.zip`;
   const zipOutputPath = path.join(DIST_DIR, zipFileName);
 
@@ -132,11 +152,10 @@ export function buildResourcePack(targetRes = 512, customTexturesDir = null) {
     fs.unlinkSync(zipOutputPath);
   }
 
-  console.log(`[4/4] Creating ZIP archive with strict POSIX path separators: ${zipFileName}...`);
+  console.log(`[4/4] Creating pure cross-platform ZIP archive: ${zipFileName}...`);
+  await createZipArchive(BUILD_TMP, zipOutputPath);
 
-  execSync(`powershell -ExecutionPolicy Bypass -File "${ZIP_SCRIPT}" -SourceDir "${BUILD_TMP}" -ZipFile "${zipOutputPath}"`, { stdio: "ignore" });
-
-  // 5. Auto-sync clean .zip archive to local .minecraft/resourcepacks if present
+  // 6. Auto-sync clean .zip archive to local .minecraft/resourcepacks if present
   const mcResourcePacks = path.join(process.env.APPDATA || "", ".minecraft", "resourcepacks");
   if (fs.existsSync(mcResourcePacks)) {
     const destZip = path.join(mcResourcePacks, zipFileName);
@@ -187,9 +206,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (isAll) {
     const resolutions = [512, 256, 128, 64, 32];
     for (const res of resolutions) {
-      buildResourcePack(res, customTexturesDir);
+      await buildResourcePack(res, customTexturesDir);
     }
   } else {
-    buildResourcePack(targetRes, customTexturesDir);
+    await buildResourcePack(targetRes, customTexturesDir);
   }
 }
