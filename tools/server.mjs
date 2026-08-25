@@ -212,7 +212,7 @@ const MIME_TYPES = {
   ".ico": "image/x-icon"
 };
 
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   const urlObj = new URL(req.url, `http://${req.headers.host || "localhost"}`);
   let reqPath = decodeURIComponent(urlObj.pathname);
 
@@ -229,7 +229,7 @@ const server = http.createServer((req, res) => {
   // API Route: /api/export (Triggers build and returns info or streams zip)
   if (reqPath === "/api/export") {
     const resParam = parseInt(urlObj.searchParams.get("res") || "512", 10);
-    const result = buildResourcePack(resParam, texturesDir);
+    const result = await buildResourcePack(resParam, texturesDir);
 
     if (urlObj.searchParams.get("download") === "1") {
       res.writeHead(200, {

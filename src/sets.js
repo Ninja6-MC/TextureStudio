@@ -69,6 +69,17 @@ export const INTERNAL_VECTOR_SETS = [
           all: "textures/oak_planks.svg"
         },
         tiling: "Toroidal Seamless"
+      },
+      {
+        id: "deepslate",
+        name: formatTitleFromId("deepslate"),
+        type: "Metamorphic Rock",
+        textures: {
+          side: "textures/deepslate.svg",
+          top: "textures/deepslate_top.svg",
+          bottom: "textures/deepslate_top.svg"
+        },
+        tiling: "Horizontal Strata"
       }
     ],
     multiblocks: [
@@ -193,6 +204,29 @@ export const INTERNAL_VECTOR_SETS = [
           { blockId: "oak_planks", pos: [0, 2, 0] },
           { blockId: "oak_log", pos: [1, 2, 0] }
         ]
+      },
+      {
+        id: "deepslate_cavern_wall",
+        name: "Deepslate Cavern Wall (3×3×2)",
+        description: "High-pressure tectonic metamorphic strata wall.",
+        gridSize: [3, 3, 2],
+        blocks: [
+          // Lower Layer
+          { blockId: "deepslate", pos: [-1, 0, -1] },
+          { blockId: "deepslate", pos: [0, 0, -1] },
+          { blockId: "deepslate", pos: [1, 0, -1] },
+          { blockId: "deepslate", pos: [-1, 0, 0] },
+          { blockId: "deepslate", pos: [0, 0, 0] },
+          { blockId: "deepslate", pos: [1, 0, 0] },
+
+          // Upper Layer
+          { blockId: "deepslate", pos: [-1, 1, -1] },
+          { blockId: "deepslate", pos: [0, 1, -1] },
+          { blockId: "deepslate", pos: [1, 1, -1] },
+          { blockId: "deepslate", pos: [-1, 1, 0] },
+          { blockId: "deepslate", pos: [0, 1, 0] },
+          { blockId: "deepslate", pos: [1, 1, 0] }
+        ]
       }
     ]
   }
@@ -201,66 +235,31 @@ export const INTERNAL_VECTOR_SETS = [
 export function createSetFromExternalPack(pack) {
   const base = pack.basePath;
 
+  const blocks = INTERNAL_VECTOR_SETS[0].blocks.map((b) => {
+    const textures = {};
+    for (const [face, texPath] of Object.entries(b.textures)) {
+      const stem = texPath.replace(/^textures\//, "").replace(/\.svg$/, "");
+      textures[face] = `${base}/block/${stem}.png`;
+    }
+    if (b.id === "grass_block") {
+      textures.side_overlay = `${base}/block/grass_block_side_overlay.png`;
+    }
+    return {
+      id: b.id,
+      name: b.name,
+      type: b.type,
+      textures,
+      tiling: "Raster Bitmap"
+    };
+  });
+
   return {
     id: pack.id,
     name: pack.name,
     description: pack.description || "External Minecraft texture pack",
     isVector: false,
     isExternal: true,
-    blocks: [
-      {
-        id: "grass_block",
-        name: formatTitleFromId("grass_block"),
-        type: "Terrain Block",
-        textures: {
-          top: `${base}/block/grass_block_top.png`,
-          bottom: `${base}/block/dirt.png`,
-          side: `${base}/block/grass_block_side.png`,
-          side_overlay: `${base}/block/grass_block_side_overlay.png`
-        },
-        tiling: "Raster Bitmap"
-      },
-      {
-        id: "dirt",
-        name: formatTitleFromId("dirt"),
-        type: "Terrain Block",
-        textures: {
-          all: `${base}/block/dirt.png`
-        },
-        tiling: "Raster Bitmap"
-      },
-      {
-        id: "dirt_path",
-        name: formatTitleFromId("dirt_path"),
-        type: "Terrain Block",
-        textures: {
-          top: `${base}/block/dirt_path_top.png`,
-          bottom: `${base}/block/dirt.png`,
-          side: `${base}/block/dirt_path_side.png`
-        },
-        tiling: "Raster Bitmap"
-      },
-      {
-        id: "oak_log",
-        name: formatTitleFromId("oak_log"),
-        type: "Wood Log",
-        textures: {
-          side: `${base}/block/oak_log.png`,
-          top: `${base}/block/oak_log_top.png`,
-          bottom: `${base}/block/oak_log_top.png`
-        },
-        tiling: "Raster Bitmap"
-      },
-      {
-        id: "oak_planks",
-        name: formatTitleFromId("oak_planks"),
-        type: "Wood Planks",
-        textures: {
-          all: `${base}/block/oak_planks.png`
-        },
-        tiling: "Raster Bitmap"
-      }
-    ],
+    blocks,
     multiblocks: INTERNAL_VECTOR_SETS[0].multiblocks
   };
 }
