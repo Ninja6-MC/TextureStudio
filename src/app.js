@@ -1,15 +1,117 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { INTERNAL_VECTOR_SETS, createSetFromExternalPack } from "./sets.js";
 
 const STORAGE_KEY = "ninja6_studio_settings_v1";
 
 // Minecraft Plains Biome Grass Tint Color
 const PLAINS_GRASS_TINT = new THREE.Color(0x79c05a);
 
+function createAdaptiveMultiblocks() {
+  return [
+    {
+      id: "adaptive_wall_3x3",
+      name: "Selected Block: 3×3 Facade Wall",
+      description: "3×3 vertical wall to test seamless horizontal and vertical tiling across 9 blocks.",
+      gridSize: [3, 3, 1],
+      isAdaptive: true,
+      blocks: [
+        { blockId: "$SELECTED", pos: [-1, 0, 0] },
+        { blockId: "$SELECTED", pos: [0, 0, 0] },
+        { blockId: "$SELECTED", pos: [1, 0, 0] },
+        { blockId: "$SELECTED", pos: [-1, 1, 0] },
+        { blockId: "$SELECTED", pos: [0, 1, 0] },
+        { blockId: "$SELECTED", pos: [1, 1, 0] },
+        { blockId: "$SELECTED", pos: [-1, 2, 0] },
+        { blockId: "$SELECTED", pos: [0, 2, 0] },
+        { blockId: "$SELECTED", pos: [1, 2, 0] }
+      ]
+    },
+    {
+      id: "adaptive_cliff_3x3",
+      name: "Selected Block: 3×3×2 Stepped Cliff",
+      description: "Two-layer stepped terrain structure to test horizontal wrapping and edge alignment.",
+      gridSize: [3, 3, 2],
+      isAdaptive: true,
+      blocks: [
+        { blockId: "$SELECTED", pos: [-1, 0, -1] },
+        { blockId: "$SELECTED", pos: [0, 0, -1] },
+        { blockId: "$SELECTED", pos: [1, 0, -1] },
+        { blockId: "$SELECTED", pos: [-1, 0, 0] },
+        { blockId: "$SELECTED", pos: [0, 0, 0] },
+        { blockId: "$SELECTED", pos: [1, 0, 0] },
+        { blockId: "$SELECTED", pos: [-1, 1, -1] },
+        { blockId: "$SELECTED", pos: [0, 1, -1] },
+        { blockId: "$SELECTED", pos: [1, 1, -1] }
+      ]
+    },
+    {
+      id: "adaptive_pillar_1x4",
+      name: "Selected Block: 1×4 Vertical Column",
+      description: "Vertical column to test vertical grain alignment and column continuity.",
+      gridSize: [1, 4, 1],
+      isAdaptive: true,
+      blocks: [
+        { blockId: "$SELECTED", pos: [0, 0, 0] },
+        { blockId: "$SELECTED", pos: [0, 1, 0] },
+        { blockId: "$SELECTED", pos: [0, 2, 0] },
+        { blockId: "$SELECTED", pos: [0, 3, 0] }
+      ]
+    },
+    {
+      id: "adaptive_platform_3x3",
+      name: "Selected Block: 3×3 Flat Platform",
+      description: "Horizontal ground platform to test 4-way planar surface tiling.",
+      gridSize: [3, 1, 3],
+      isAdaptive: true,
+      blocks: [
+        { blockId: "$SELECTED", pos: [-1, 0, -1] },
+        { blockId: "$SELECTED", pos: [0, 0, -1] },
+        { blockId: "$SELECTED", pos: [1, 0, -1] },
+        { blockId: "$SELECTED", pos: [-1, 0, 0] },
+        { blockId: "$SELECTED", pos: [0, 0, 0] },
+        { blockId: "$SELECTED", pos: [1, 0, 0] },
+        { blockId: "$SELECTED", pos: [-1, 0, 1] },
+        { blockId: "$SELECTED", pos: [0, 0, 1] },
+        { blockId: "$SELECTED", pos: [1, 0, 1] }
+      ]
+    }
+  ];
+}
+
+function buildExternalSet(pack, referenceBlocks = [], multiblocks = []) {
+  const base = pack.basePath;
+  const blocks = referenceBlocks.map((b) => {
+    const textures = {};
+    for (const [face, texPath] of Object.entries(b.textures)) {
+      const stem = texPath.replace(/^textures\//, "").replace(/\.(svg|png)$/, "");
+      textures[face] = `${base}/block/${stem}.png`;
+    }
+    if (b.id === "grass_block") {
+      textures.side_overlay = `${base}/block/grass_block_side_overlay.png`;
+    }
+    return {
+      id: b.id,
+      name: b.name,
+      type: b.type,
+      textures,
+      tiling: "Raster Bitmap"
+    };
+  });
+
+  return {
+    id: pack.id,
+    name: pack.name,
+    description: pack.description || "External Minecraft texture pack",
+    isVector: false,
+    isExternal: true,
+    blocks,
+    multiblocks
+  };
+}
+
 class TextureStudioApp {
   constructor() {
-    this.allSets = [...INTERNAL_VECTOR_SETS];
+    this.allSets = [];
     this.selectedSetIndices = [0, 1];
     this.currentResolution = "512";
     this.currentMode = "single";
@@ -31,7 +133,7 @@ class TextureStudioApp {
     this.initDOM();
     this.loadPersistedSettings();
 
-    this.loadExternalPacks().then(() => {
+    this.loadAllSets().then(() => {
       this.initAllViewports();
       this.bindEvents();
       this.bindExportEvents();
@@ -106,13 +208,65 @@ class TextureStudioApp {
     this.dom.btnGrid.classList.toggle("active", this.showGrid);
   }
 
-  async loadExternalPacks() {
+  async loadAllSets() {
+    this.allSets = [];
+    let customModule = null;
+
+    // 1. Try loading custom sets.js if present locally
+    try {
+      customModule = await import("./sets.js");
+      if (customModule && Array.isArray(customModule.INTERNAL_VECTOR_SETS) && customModule.INTERNAL_VECTOR_SETS.length > 0) {
+        this.allSets.push(...customModule.INTERNAL_VECTOR_SETS);
+      }
+    } catch {
+      // sets.js is not present or failed to import - proceed with dynamic auto-discovery
+    }
+
+    // 2. If no custom sets loaded, fetch dynamic pack from /api/pack
+    if (this.allSets.length === 0) {
+      try {
+        const res = await fetch("/api/pack");
+        if (res.ok) {
+          const pack = await res.json();
+          this.allSets.push({
+            id: pack.id,
+            name: pack.name,
+            description: pack.description,
+            isVector: true,
+            blocks: pack.blocks || [],
+            multiblocks: createAdaptiveMultiblocks()
+          });
+        }
+      } catch (e) {
+        console.warn("Could not load dynamic /api/pack:", e);
+      }
+    }
+
+    // Fallback if still empty
+    if (this.allSets.length === 0) {
+      this.allSets.push({
+        id: "pack-default",
+        name: "✨ [Pack] Active Pack",
+        description: "Empty pack",
+        isVector: true,
+        blocks: [],
+        multiblocks: createAdaptiveMultiblocks()
+      });
+    }
+
+    const primarySet = this.allSets[0];
+
+    // 3. Load External Comparison Packs
     try {
       const res = await fetch("/api/packs");
       if (res.ok) {
         const packs = await res.json();
         packs.forEach((pack) => {
-          this.allSets.push(createSetFromExternalPack(pack));
+          if (customModule && typeof customModule.createSetFromExternalPack === "function") {
+            this.allSets.push(customModule.createSetFromExternalPack(pack, primarySet.blocks));
+          } else {
+            this.allSets.push(buildExternalSet(pack, primarySet.blocks, primarySet.multiblocks));
+          }
         });
       }
     } catch (e) {
@@ -911,6 +1065,9 @@ class TextureStudioApp {
   }
 
   async renderMultiblockToGroup(multiDef, currentSet, group) {
+    const primarySet = this.getPrimarySet();
+    const primaryBlock = primarySet.blocks[this.selectedBlockIndex] || primarySet.blocks[0];
+
     const blockDefsMap = new Map();
     currentSet.blocks.forEach((b) => blockDefsMap.set(b.id, b));
     const boxGeo = new THREE.BoxGeometry(1, 1, 1);
@@ -930,7 +1087,8 @@ class TextureStudioApp {
     uvAttr.needsUpdate = true;
 
     for (const item of multiDef.blocks) {
-      const bDef = blockDefsMap.get(item.blockId);
+      const targetId = (item.blockId === "$SELECTED" && primaryBlock) ? primaryBlock.id : item.blockId;
+      const bDef = blockDefsMap.get(targetId);
       if (!bDef) {
         this.renderMissingPlaceholder(group, item.pos);
         continue;
