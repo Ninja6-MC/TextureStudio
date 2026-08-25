@@ -69,6 +69,17 @@ export const INTERNAL_VECTOR_SETS = [
           all: "textures/oak_planks.svg"
         },
         tiling: "Toroidal Seamless"
+      },
+      {
+        id: "deepslate",
+        name: formatTitleFromId("deepslate"),
+        type: "Metamorphic Rock",
+        textures: {
+          side: "textures/deepslate.svg",
+          top: "textures/deepslate_top.svg",
+          bottom: "textures/deepslate_top.svg"
+        },
+        tiling: "Horizontal Strata"
       }
     ],
     multiblocks: [
@@ -192,6 +203,29 @@ export const INTERNAL_VECTOR_SETS = [
           { blockId: "oak_log", pos: [-1, 2, 0] },
           { blockId: "oak_planks", pos: [0, 2, 0] },
           { blockId: "oak_log", pos: [1, 2, 0] }
+        ]
+      },
+      {
+        id: "deepslate_cavern_wall",
+        name: "Deepslate Cavern Wall (3×3×2)",
+        description: "High-pressure tectonic metamorphic strata wall.",
+        gridSize: [3, 3, 2],
+        blocks: [
+          // Lower Layer
+          { blockId: "deepslate", pos: [-1, 0, -1] },
+          { blockId: "deepslate", pos: [0, 0, -1] },
+          { blockId: "deepslate", pos: [1, 0, -1] },
+          { blockId: "deepslate", pos: [-1, 0, 0] },
+          { blockId: "deepslate", pos: [0, 0, 0] },
+          { blockId: "deepslate", pos: [1, 0, 0] },
+
+          // Upper Layer
+          { blockId: "deepslate", pos: [-1, 1, -1] },
+          { blockId: "deepslate", pos: [0, 1, -1] },
+          { blockId: "deepslate", pos: [1, 1, -1] },
+          { blockId: "deepslate", pos: [-1, 1, 0] },
+          { blockId: "deepslate", pos: [0, 1, 0] },
+          { blockId: "deepslate", pos: [1, 1, 0] }
         ]
       }
     ]
