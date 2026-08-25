@@ -11,11 +11,11 @@ export function formatTitleFromId(id) {
     .join(" ");
 }
 
-// Native Generated Vector Sets (Distinguished by ✨ [N6 Vector])
+// Native Generated Vector Sets (Distinguished by ✨ [Keyframe])
 export const INTERNAL_VECTOR_SETS = [
   {
     id: "set-trailer-batch-1",
-    name: "✨ [N6 Vector] Trailer Batch 1: Plains & Forest",
+    name: "✨ [Keyframe] Trailer Batch 1: Plains & Forest",
     description: "Official Minecraft Cinematic Trailer style vector textures.",
     isVector: true,
     blocks: [

@@ -12,13 +12,36 @@ const CACHE_DIR = path.join(ROOT_DIR, "cache", "packs");
 const DIST_DIR = path.join(ROOT_DIR, "dist");
 const PORT = process.env.PORT || 3000;
 
+let texturesDir = null;
 let packsFolder = null;
+
 for (let i = 2; i < process.argv.length; i++) {
-  if (process.argv[i] === "--packs" && process.argv[i + 1]) {
-    packsFolder = process.argv[i + 1];
+  if (process.argv[i] === "--textures" && process.argv[i + 1]) {
+    texturesDir = path.resolve(process.argv[i + 1]);
+    i++;
+  } else if (process.argv[i] === "--pack" && process.argv[i + 1]) {
+    const packPath = path.resolve(process.argv[i + 1]);
+    texturesDir = fs.existsSync(path.join(packPath, "textures")) ? path.join(packPath, "textures") : packPath;
+    i++;
+  } else if (process.argv[i] === "--packs" && process.argv[i + 1]) {
+    packsFolder = path.resolve(process.argv[i + 1]);
     i++;
   } else if (!process.argv[i].startsWith("--")) {
-    packsFolder = process.argv[i];
+    packsFolder = path.resolve(process.argv[i]);
+  }
+}
+
+// Auto-discovery fallback for textures directory (checks sibling Keyframe or local textures)
+if (!texturesDir) {
+  const siblingKeyframe = path.resolve(ROOT_DIR, "..", "Keyframe", "textures");
+  const localTextures = path.join(ROOT_DIR, "textures");
+  if (fs.existsSync(siblingKeyframe)) {
+    texturesDir = siblingKeyframe;
+  } else if (fs.existsSync(localTextures)) {
+    texturesDir = localTextures;
+  } else {
+    texturesDir = localTextures;
+    fs.mkdirSync(localTextures, { recursive: true });
   }
 }
 
@@ -206,7 +229,7 @@ const server = http.createServer((req, res) => {
   // API Route: /api/export (Triggers build and returns info or streams zip)
   if (reqPath === "/api/export") {
     const resParam = parseInt(urlObj.searchParams.get("res") || "512", 10);
-    const result = buildResourcePack(resParam);
+    const result = buildResourcePack(resParam, texturesDir);
 
     if (urlObj.searchParams.get("download") === "1") {
       res.writeHead(200, {
@@ -229,6 +252,21 @@ const server = http.createServer((req, res) => {
       downloadUrl: `/api/export?res=${resParam}&download=1`
     }));
     return;
+  }
+
+  // Dynamic Textures Directory Serving (/textures/*)
+  if (reqPath.startsWith("/textures/")) {
+    const relFile = reqPath.replace(/^\/textures\//, "");
+    const targetFile = path.join(texturesDir, relFile);
+    if (fs.existsSync(targetFile) && fs.statSync(targetFile).isFile()) {
+      res.writeHead(200, {
+        "Content-Type": "image/svg+xml",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Access-Control-Allow-Origin": "*"
+      });
+      fs.createReadStream(targetFile).pipe(res);
+      return;
+    }
   }
 
   if (reqPath === "/") reqPath = "/index.html";
@@ -270,7 +308,8 @@ server.on("error", (e) => {
 server.listen(PORT, () => {
   console.log(`\n======================================================`);
   console.log(`  Ninja6 Texture Studio — Multi-Set 3D Engine & Compiler`);
-  console.log(`  Packs Directory: ${packsFolder || "(None)"}`);
-  console.log(`  Running live at: http://localhost:${PORT}`);
+  console.log(`  Working Pack Dir: ${texturesDir}`);
+  console.log(`  Comparison Packs: ${packsFolder || "(None)"}`);
+  console.log(`  Running live at:  http://localhost:${PORT}`);
   console.log(`======================================================\n`);
 });

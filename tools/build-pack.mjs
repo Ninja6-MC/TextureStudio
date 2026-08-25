@@ -15,10 +15,19 @@ const ZIP_SCRIPT = path.join(__dirname, "zip.ps1");
 /**
  * Main Resource Pack Compiler
  */
-export function buildResourcePack(targetRes = 512) {
+export function buildResourcePack(targetRes = 512, customTexturesDir = null) {
+  let activeTexturesDir = customTexturesDir ? path.resolve(customTexturesDir) : path.join(ROOT_DIR, "textures");
+  if (!fs.existsSync(activeTexturesDir) || fs.readdirSync(activeTexturesDir).length === 0) {
+    const siblingKeyframe = path.resolve(ROOT_DIR, "..", "Keyframe", "textures");
+    if (fs.existsSync(siblingKeyframe)) {
+      activeTexturesDir = siblingKeyframe;
+    }
+  }
+
   console.log(`\n======================================================`);
-  console.log(`  Ninja6 Vector Resource Pack Compiler`);
+  console.log(`  Keyframe Vector Resource Pack Compiler`);
   console.log(`  Target Resolution: ${targetRes}×${targetRes}`);
+  console.log(`  Source Textures:   ${activeTexturesDir}`);
   console.log(`======================================================\n`);
 
   if (!fs.existsSync(DIST_DIR)) {
@@ -43,19 +52,19 @@ export function buildResourcePack(targetRes = 512) {
         min_inclusive: 15,
         max_inclusive: 46
       },
-      description: `§6Ninja6 Vector HD §8- §a${targetRes}x§r\n§7Vector-Mastered Native Textures`
+      description: `§6Keyframe §8- §a${targetRes}x§r\n§7The Cinematic Trailer Vector Pack`
     }
   };
 
   fs.writeFileSync(path.join(BUILD_TMP, "pack.mcmeta"), JSON.stringify(mcmeta, null, 2), "utf-8");
   console.log(`[1/4] Created pack.mcmeta (Supported Formats: 1.20 - 1.21.4+)`);
 
-  if (!fs.existsSync(TEXTURES_DIR)) {
-    fs.mkdirSync(TEXTURES_DIR, { recursive: true });
+  if (!fs.existsSync(activeTexturesDir)) {
+    fs.mkdirSync(activeTexturesDir, { recursive: true });
   }
 
   // 2. High-Speed Rust Resvg Rasterization
-  const svgFiles = fs.readdirSync(TEXTURES_DIR).filter((f) => f.endsWith(".svg"));
+  const svgFiles = fs.readdirSync(activeTexturesDir).filter((f) => f.endsWith(".svg"));
   const ITEM_IDS = new Set(["cooked_beef", "golden_apple", "compass_nexus", "plot_compass", "spiral_core", "ninja6_token"]);
 
   function rasterize(srcSvgPath, destPngPath, size) {
@@ -116,7 +125,7 @@ export function buildResourcePack(targetRes = 512) {
   console.log(`[4/5] Generated pack.png (128×128 icon)`);
 
   // 4. Package into clean Minecraft-compliant .ZIP with strict POSIX '/' separators
-  const zipFileName = `Ninja6-Vector-HD-${targetRes}x.zip`;
+  const zipFileName = `Keyframe-${targetRes}x.zip`;
   const zipOutputPath = path.join(DIST_DIR, zipFileName);
 
   if (fs.existsSync(zipOutputPath)) {
@@ -127,14 +136,12 @@ export function buildResourcePack(targetRes = 512) {
 
   execSync(`powershell -ExecutionPolicy Bypass -File "${ZIP_SCRIPT}" -SourceDir "${BUILD_TMP}" -ZipFile "${zipOutputPath}"`, { stdio: "ignore" });
 
-  // 5. Auto-sync unzipped folder to local .minecraft/resourcepacks if present
+  // 5. Auto-sync clean .zip archive to local .minecraft/resourcepacks if present
   const mcResourcePacks = path.join(process.env.APPDATA || "", ".minecraft", "resourcepacks");
   if (fs.existsSync(mcResourcePacks)) {
-    const destFolder = path.join(mcResourcePacks, "Ninja6-Vector-HD-512x");
-    fs.cpSync(BUILD_TMP, destFolder, { recursive: true });
-    // Also copy zip
-    fs.copyFileSync(zipOutputPath, path.join(mcResourcePacks, zipFileName));
-    console.log(`[5/5] Auto-deployed to Minecraft: ${destFolder}`);
+    const destZip = path.join(mcResourcePacks, zipFileName);
+    fs.copyFileSync(zipOutputPath, destZip);
+    console.log(`[5/5] Auto-deployed to Minecraft: ${destZip}`);
   }
 
   const fileBuffer = fs.readFileSync(zipOutputPath);
@@ -160,21 +167,29 @@ export function buildResourcePack(targetRes = 512) {
 
 // CLI Execution Support
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  if (process.argv.includes("--all")) {
+  let customTexturesDir = null;
+  let targetRes = 512;
+  const isAll = process.argv.includes("--all");
+
+  for (let i = 2; i < process.argv.length; i++) {
+    if ((process.argv[i] === "--textures" || process.argv[i] === "--pack" || process.argv[i] === "--src") && process.argv[i + 1]) {
+      const p = path.resolve(process.argv[i + 1]);
+      customTexturesDir = fs.existsSync(path.join(p, "textures")) ? path.join(p, "textures") : p;
+      i++;
+    } else if (process.argv[i] === "--res" && process.argv[i + 1]) {
+      targetRes = parseInt(process.argv[i + 1], 10) || 512;
+      i++;
+    } else if (!isNaN(parseInt(process.argv[i], 10))) {
+      targetRes = parseInt(process.argv[i], 10);
+    }
+  }
+
+  if (isAll) {
     const resolutions = [512, 256, 128, 64, 32];
     for (const res of resolutions) {
-      buildResourcePack(res);
+      buildResourcePack(res, customTexturesDir);
     }
   } else {
-    let targetRes = 512;
-    for (let i = 2; i < process.argv.length; i++) {
-      if (process.argv[i] === "--res" && process.argv[i + 1]) {
-        targetRes = parseInt(process.argv[i + 1], 10) || 512;
-        i++;
-      } else if (!isNaN(parseInt(process.argv[i], 10))) {
-        targetRes = parseInt(process.argv[i], 10);
-      }
-    }
-    buildResourcePack(targetRes);
+    buildResourcePack(targetRes, customTexturesDir);
   }
 }
