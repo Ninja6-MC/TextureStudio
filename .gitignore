@@ -11,6 +11,9 @@ textures/
 # Reference Media & Video Footage (Copyrighted trailers, footage, and crops)
 references/
 
+# Local Studio Configurations (Custom sets)
+src/sets.js
+
 # OS & Editor Artifacts
 .DS_Store
 Thumbs.db

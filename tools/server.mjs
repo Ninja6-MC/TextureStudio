@@ -197,6 +197,106 @@ function discoverPacks(folderPath) {
   return discovered;
 }
 
+function discoverActivePack(dir) {
+  let packTitle = "Active Pack";
+  const parentDir = path.dirname(dir);
+  const pkgJsonPath = path.join(parentDir, "package.json");
+  if (fs.existsSync(pkgJsonPath)) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, "utf-8"));
+      if (pkg.name) {
+        packTitle = pkg.name.replace(/^@[^/]+\//, "");
+        packTitle = packTitle.charAt(0).toUpperCase() + packTitle.slice(1);
+      }
+    } catch {}
+  } else {
+    packTitle = path.basename(parentDir) || "Active Pack";
+  }
+
+  if (!fs.existsSync(dir)) {
+    return {
+      id: "pack-active",
+      name: `✨ [Pack] ${packTitle}`,
+      folderName: packTitle,
+      description: "No textures found in working directory",
+      isVector: true,
+      blocks: []
+    };
+  }
+
+  const files = fs.readdirSync(dir).filter((f) => /\.(svg|png)$/i.test(f));
+  const fileSet = new Set(files);
+  const blocks = new Map();
+
+  function formatTitle(id) {
+    return id.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+  }
+
+  // 1. Multi-part textures
+  for (const file of files) {
+    const stem = file.replace(/\.(svg|png)$/i, "");
+    if (stem.endsWith("_side_overlay")) {
+      const base = stem.replace(/_side_overlay$/, "");
+      if (!blocks.has(base)) blocks.set(base, { id: base, textures: {} });
+      blocks.get(base).textures.side_overlay = `textures/${file}`;
+    } else if (stem.endsWith("_top")) {
+      const base = stem.replace(/_top$/, "");
+      if (!blocks.has(base)) blocks.set(base, { id: base, textures: {} });
+      blocks.get(base).textures.top = `textures/${file}`;
+      if (!blocks.get(base).textures.bottom) blocks.get(base).textures.bottom = `textures/${file}`;
+    } else if (stem.endsWith("_bottom")) {
+      const base = stem.replace(/_bottom$/, "");
+      if (!blocks.has(base)) blocks.set(base, { id: base, textures: {} });
+      blocks.get(base).textures.bottom = `textures/${file}`;
+    } else if (stem.endsWith("_side")) {
+      const base = stem.replace(/_side$/, "");
+      if (!blocks.has(base)) blocks.set(base, { id: base, textures: {} });
+      blocks.get(base).textures.side = `textures/${file}`;
+    }
+  }
+
+  // 2. Base & standalone textures
+  for (const file of files) {
+    const stem = file.replace(/\.(svg|png)$/i, "");
+    if (stem.endsWith("_side_overlay") || stem.endsWith("_top") || stem.endsWith("_bottom") || stem.endsWith("_side")) {
+      continue;
+    }
+    if (blocks.has(stem)) {
+      blocks.get(stem).textures.side = `textures/${file}`;
+    } else {
+      blocks.set(stem, {
+        id: stem,
+        textures: { all: `textures/${file}` }
+      });
+    }
+  }
+
+  // Special fallbacks (e.g. grass_block / dirt_path dirt bottom)
+  if (blocks.has("grass_block") && !blocks.get("grass_block").textures.bottom && fileSet.has("dirt.svg")) {
+    blocks.get("grass_block").textures.bottom = "textures/dirt.svg";
+  }
+  if (blocks.has("dirt_path") && !blocks.get("dirt_path").textures.bottom && fileSet.has("dirt.svg")) {
+    blocks.get("dirt_path").textures.bottom = "textures/dirt.svg";
+  }
+
+  const discoveredBlocks = Array.from(blocks.values()).map((b) => ({
+    id: b.id,
+    name: formatTitle(b.id),
+    type: b.id.includes("log") ? "Wood Log" : (b.id.includes("plank") ? "Wood Planks" : (b.id.includes("deepslate") ? "Metamorphic Rock" : "Terrain Block")),
+    textures: b.textures,
+    tiling: "Toroidal Seamless"
+  }));
+
+  return {
+    id: "pack-active",
+    name: `✨ [Pack] ${packTitle}`,
+    folderName: packTitle,
+    description: "Dynamically discovered textures from working directory",
+    isVector: true,
+    blocks: discoveredBlocks
+  };
+}
+
 const externalPacks = discoverPacks(packsFolder);
 
 const MIME_TYPES = {
@@ -216,7 +316,18 @@ const server = http.createServer(async (req, res) => {
   const urlObj = new URL(req.url, `http://${req.headers.host || "localhost"}`);
   let reqPath = decodeURIComponent(urlObj.pathname);
 
-  // API Route: /api/packs
+  // API Route: /api/pack (Active Working Pack Auto-Discovery)
+  if (reqPath === "/api/pack") {
+    const activePack = discoverActivePack(texturesDir);
+    res.writeHead(200, {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*"
+    });
+    res.end(JSON.stringify(activePack));
+    return;
+  }
+
+  // API Route: /api/packs (External Comparison Packs)
   if (reqPath === "/api/packs") {
     res.writeHead(200, {
       "Content-Type": "application/json",
