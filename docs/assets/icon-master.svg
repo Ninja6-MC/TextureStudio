@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!--
+    TextureStudio icon — AUTHORING MASTER. Single source of truth.
+
+    Geometry only; no baked colour and no baked plate in definitions.
+    Variants are composed by scripts/export-icons.mjs via inherited presentation attributes.
+    Conforms to the Ninja6-MC Brand Identity System (ICON_PLAN.md).
+
+    CONVENTIONS:
+    1. Pure orthogonal vector geometry, stroke-linecap="square", stroke-linejoin="miter".
+    2. Master stroke weight is 48; small-size cut is 118.
+    3. Paint arrives through inherited presentation attributes: polyline leaves stroke
+       unset (fill="none" explicit), circle leaves fill unset (stroke="none" explicit).
+    4. Safe zone: all artwork strictly within r <= 460 of (512,512).
+    5. Metaphor: Stepped Resolution Matrix representing discrete Minecraft block texels,
+       multi-resolution resource pack scaling (512x -> 256 -> 128 -> 64 -> 32), and
+       an amber origin texel anchor at (352,352).
+  -->
+  <defs>
+    <!-- FULL MARK: Stroke 48, Source Texel Amber Dot r=48 at (352, 352) -->
+    <g id="geo">
+      <polyline points="256,768 256,256 768,256 768,448 640,448 640,640 448,640 448,768 256,768"
+                fill="none" stroke-width="48"
+                stroke-linecap="square" stroke-linejoin="miter" />
+      <circle cx="352" cy="352" r="48" stroke="none" />
+    </g>
+
+    <!-- SMALL-SIZE CUT (<=24px): Stroke 118, Dot dropped for clear aperture -->
+    <g id="geo-small">
+      <polyline points="256,768 256,256 768,256 768,448 640,448 640,640 448,640 448,768 256,768"
+                fill="none" stroke-width="118"
+                stroke-linecap="square" stroke-linejoin="miter" />
+    </g>
+  </defs>
+
+  <!-- Default preview on dark plate -->
+  <rect width="1024" height="1024" rx="225" fill="#12161A" />
+  <g stroke="#2DD4BF" fill="#FFAC1C">
+    <use href="#geo" />
+  </g>
+</svg>

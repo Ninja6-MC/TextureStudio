@@ -1,6 +1,13 @@
 # Texture Studio
 
 <p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/icon-transparent-dark.svg">
+    <img src="docs/assets/icon-transparent-light.svg" width="128" height="128" alt="">
+  </picture>
+</p>
+
+<p align="center">
   <b>Resolution-independent 3D vector texture studio and multi-resolution Minecraft resource pack compiler.</b>
 </p>
 
