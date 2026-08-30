@@ -11,7 +11,8 @@
     "build:128": "node tools/build-pack.mjs --res 128",
     "build:64": "node tools/build-pack.mjs --res 64",
     "build:32": "node tools/build-pack.mjs --res 32",
-    "build:all": "node tools/build-pack.mjs --all"
+    "build:all": "node tools/build-pack.mjs --all",
+    "export:icons": "node scripts/export-icons.mjs"
   },
   "keywords": [
     "minecraft",
