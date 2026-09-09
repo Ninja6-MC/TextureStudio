@@ -1,5 +1,7 @@
-# Copy to `.github/dependabot.yml`. Nothing else changes unless the repository has a
-# build worth covering - see the note at the bottom.
+# This repository's copy of Ninja6-MC/.github templates/dependabot.template.
+#
+# THE PATH IS LOAD-BEARING. Dependabot reads this file only at .github/dependabot.yml.
+# A copy at the repository root parses fine, shows up in review and never runs.
 #
 # WHY THIS EXISTS. Workflow actions in this org are pinned to commit SHAs, not tags:
 # a tag can be repointed at new code with no diff, no review and no notification. The
@@ -53,8 +55,44 @@ updates:
     # anything. Ungrouped, it is what split the first batch.
     open-pull-requests-limit: 5
 
-# ADDING THE BUILD'S OWN ECOSYSTEM is a separate decision, deliberately not made here.
-# Actions are infrastructure and a bump is a security question. A compile-time
-# dependency is not: a Minecraft plugin is built against a specific server API, and a
-# bot raising that version is a compatibility change wearing a security change's
-# clothes. Add `gradle`, `npm` or whatever applies only when someone owns the review.
+# THE BUILD'S OWN ECOSYSTEM. The template leaves this decision to each repository and
+# asks that it only be made when someone owns the review. It is made here, and the npm
+# block below is the result.
+#
+# The template's caution is about a Minecraft plugin compiled against a specific server
+# API, where a bot raising the version is a compatibility change wearing a security
+# change's clothes. Nothing here is that: @resvg/resvg-js and archiver are ordinary
+# runtime dependencies of a build tool, and neither decides what this repository is
+# compatible WITH.
+#
+# What is worth knowing instead: this repository has no build or test workflow, so a
+# proposal here is verified by reading it and by running the pack build locally. Majors
+# are grouped separately for that reason above all - @resvg/resvg-js is a native module,
+# and a major is a rendering change nothing in CI would catch.
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      npm:
+        applies-to: version-updates
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch
+      npm-major:
+        applies-to: version-updates
+        patterns:
+          - '*'
+        update-types:
+          - major
+    commit-message:
+      # `build` rather than `ci`: ci is the Conventional Commits type for workflow
+      # actions, build is the one for build-system dependencies.
+      prefix: build
+    labels:
+      - dependencies
+    open-pull-requests-limit: 5
