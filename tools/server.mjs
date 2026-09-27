@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
 import { buildResourcePack } from "./build-pack.mjs";
+import { handlePbrRequest } from "./server-pbr.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -316,6 +317,12 @@ const server = http.createServer(async (req, res) => {
   const urlObj = new URL(req.url, `http://${req.headers.host || "localhost"}`);
   let reqPath = decodeURIComponent(urlObj.pathname);
 
+  // API Route: /api/pbr/:blockId/:mapType (Dynamic LabPBR 1.3 Normal & Specular Generator)
+  if (reqPath.startsWith("/api/pbr/")) {
+    const handled = await handlePbrRequest(req, res, { texturesDir });
+    if (handled) return;
+  }
+
   // API Route: /api/pack (Active Working Pack Auto-Discovery)
   if (reqPath === "/api/pack") {
     const activePack = discoverActivePack(texturesDir);
@@ -416,11 +423,15 @@ server.on("error", (e) => {
   }
 });
 
-server.listen(PORT, () => {
+if (process.argv[1] === fileURLToPath(import.meta.url) || process.env.NODE_ENV !== "test") {
+  server.listen(PORT, () => {
   console.log(`\n======================================================`);
   console.log(`  Ninja6 Texture Studio — Multi-Set 3D Engine & Compiler`);
   console.log(`  Working Pack Dir: ${texturesDir}`);
   console.log(`  Comparison Packs: ${packsFolder || "(None)"}`);
   console.log(`  Running live at:  http://localhost:${PORT}`);
   console.log(`======================================================\n`);
-});
+  });
+}
+
+export { server };
