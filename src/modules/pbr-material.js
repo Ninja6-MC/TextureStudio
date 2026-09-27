@@ -224,6 +224,7 @@ export function unpackLabPBRSpecular(r, g, b, a) {
  */
 export function applyLabPBRShader(material, options = {}) {
   const existingOnBeforeCompile = material.onBeforeCompile;
+  const existingCacheKey = material.customProgramCacheKey;
 
   material.defines = material.defines || {};
   if (material.specularMap || options.specularMap) {
@@ -247,13 +248,20 @@ export function applyLabPBRShader(material, options = {}) {
       }
     };
 
-    // 1. Declare specularMap and aoIntensity uniforms in fragment shader
+    shader.uniforms.labpbrEmissiveIntensity = {
+      get value() {
+        return material.userData?.emissiveIntensity ?? options.emissiveIntensity ?? 1.0;
+      }
+    };
+
+    // 1. Declare specularMap, labpbrEmissiveIntensity, and aoIntensity uniforms in fragment shader
     if (!shader.fragmentShader.includes("uniform sampler2D specularMap;")) {
       shader.fragmentShader = shader.fragmentShader.replace(
         "#include <roughnessmap_pars_fragment>",
         `#include <roughnessmap_pars_fragment>
 #ifdef USE_LABPBR_SPECULAR
 uniform sampler2D specularMap;
+uniform float labpbrEmissiveIntensity;
 #endif
 uniform float labpbrAoIntensity;
 `
@@ -340,7 +348,7 @@ uniform float labpbrAoIntensity;
 #ifdef USE_LABPBR_SPECULAR
 	// LabPBR 1.3: Emission = SpecularTex.a (albedo modulated emission)
 	vec3 labpbrEmissiveColor = length( emissive ) > 0.0 ? emissive : diffuseColor.rgb;
-	totalEmissiveRadiance += labpbrEmissiveColor * ( labpbrSpecularTex.a * emissiveIntensity );
+	totalEmissiveRadiance += labpbrEmissiveColor * ( labpbrSpecularTex.a * labpbrEmissiveIntensity );
 #endif`
       );
     }
@@ -365,12 +373,14 @@ uniform float labpbrAoIntensity;
   };
 
   material.customProgramCacheKey = function () {
-    return [
+    const parentKey = typeof existingCacheKey === "function" ? existingCacheKey.call(this) : "";
+    const labpbrKey = [
       "labpbr",
       Boolean(this.normalMap || options.normalMap),
       Boolean(this.specularMap || options.specularMap),
       this.version || 0
     ].join("_");
+    return parentKey ? `${parentKey}|${labpbrKey}` : labpbrKey;
   };
 
   return material;
@@ -439,7 +449,8 @@ export function createLabPBRMaterial(options = {}) {
     ...restOptions,
     map: baseMap,
     roughness,
-    metalness
+    metalness,
+    emissiveIntensity
   };
 
   if (baseNormalMap) {

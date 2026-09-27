@@ -159,14 +159,17 @@ test("createLabPBRMaterial creates Three.js MeshStandardMaterial with configured
     normalMap: normalTexture,
     specularMap: specularTexture,
     roughness: 0.9,
-    metalness: 0.8
+    metalness: 0.8,
+    emissiveIntensity: 2.5
   });
 
   assert.ok(material instanceof THREE.MeshStandardMaterial);
   assert.strictEqual(material.map, albedoTexture);
   assert.strictEqual(material.normalMap, normalTexture);
   assert.strictEqual(material.specularMap, specularTexture);
+  assert.equal(material.emissiveIntensity, 2.5, "emissiveIntensity must be forwarded to material");
   assert.equal(material.userData.isLabPBR, true);
+  assert.equal(material.userData.emissiveIntensity, 2.5);
 
   // Verify texture color spaces
   assert.equal(albedoTexture.colorSpace, COLOR_SPACES.SRGB, "Albedo map must use sRGB color space");
@@ -202,7 +205,8 @@ test("applyLabPBRShader injects uniforms and onBeforeCompile shader hook", () =>
   applyLabPBRShader(material, {
     normalMap: normalTex,
     specularMap: specularTex,
-    aoIntensity: 0.75
+    aoIntensity: 0.75,
+    emissiveIntensity: 1.8
   });
 
   assert.equal(material.defines.USE_LABPBR_SPECULAR, "1");
@@ -222,6 +226,8 @@ test("applyLabPBRShader injects uniforms and onBeforeCompile shader hook", () =>
   assert.strictEqual(shader.uniforms.specularMap.value, specularTex);
   assert.ok(shader.uniforms.labpbrAoIntensity, "labpbrAoIntensity uniform must be injected");
   assert.equal(shader.uniforms.labpbrAoIntensity.value, 0.75);
+  assert.ok(shader.uniforms.labpbrEmissiveIntensity, "labpbrEmissiveIntensity uniform must be injected");
+  assert.equal(shader.uniforms.labpbrEmissiveIntensity.value, 1.8);
 
   // 2. Verify Fragment Shader declarations
   assert.ok(
@@ -231,6 +237,10 @@ test("applyLabPBRShader injects uniforms and onBeforeCompile shader hook", () =>
   assert.ok(
     shader.fragmentShader.includes("uniform float labpbrAoIntensity;"),
     "Fragment shader must declare labpbrAoIntensity uniform"
+  );
+  assert.ok(
+    shader.fragmentShader.includes("uniform float labpbrEmissiveIntensity;"),
+    "Fragment shader must declare labpbrEmissiveIntensity uniform"
   );
 
   // 3. Verify Normal channel unpacking (DirectX Y-flip, AO, Height)
@@ -257,8 +267,8 @@ test("applyLabPBRShader injects uniforms and onBeforeCompile shader hook", () =>
     "Fragment shader must threshold F0 metalness (dielectric vs conductor)"
   );
   assert.ok(
-    shader.fragmentShader.includes("labpbrSpecularTex.a * emissiveIntensity"),
-    "Fragment shader must unpack emission from SpecularTex.a"
+    shader.fragmentShader.includes("labpbrSpecularTex.a * labpbrEmissiveIntensity"),
+    "Fragment shader must unpack emission scaled by labpbrEmissiveIntensity"
   );
 });
 
@@ -295,4 +305,12 @@ test("customProgramCacheKey generates unique cache keys based on active maps", (
 
   assert.notEqual(key1, key2);
   assert.notEqual(key2, key3);
+});
+
+test("customProgramCacheKey chains pre-existing customProgramCacheKey callback", () => {
+  const mat = new THREE.MeshStandardMaterial();
+  mat.customProgramCacheKey = () => "parent_cache_key";
+  applyLabPBRShader(mat);
+  const key = mat.customProgramCacheKey();
+  assert.ok(key.startsWith("parent_cache_key|labpbr_"), "Must chain parent customProgramCacheKey");
 });
