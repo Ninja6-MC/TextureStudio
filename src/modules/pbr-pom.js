@@ -1,3 +1,5 @@
+import * as THREE_DEFAULT from "three";
+
 /**
  * Parallax Occlusion Mapping (POM) Shader Extension for TextureStudio
  *
@@ -386,7 +388,11 @@ vec2 parallaxOcclusionMapping( vec2 initialUv, vec3 viewDirTangent, sampler2D no
  * @returns {object} The modified material instance
  */
 export function applyPOM(material, options = {}) {
-  const enabled = options.pomEnabled ?? options.enabled ?? true;
+  const THREE = options.THREE || (typeof globalThis !== "undefined" && globalThis.THREE) || THREE_DEFAULT;
+  const enabled =
+    options.pomEnabled ??
+    options.enabled ??
+    (typeof options.pom === "boolean" ? options.pom : (options.pom?.enabled ?? true));
   const depthScale = clampDepthScale(options.depthScale ?? options.pomDepthScale ?? POM_DEFAULT_DEPTH_SCALE);
   const minSamples = options.minSamples ?? options.pomMinSamples ?? POM_DEFAULT_MIN_SAMPLES;
   const maxSamples = options.maxSamples ?? options.pomMaxSamples ?? POM_DEFAULT_MAX_SAMPLES;
@@ -533,7 +539,7 @@ if ( uPomEnabled > 0.5 && uPomDepthScale > 0.0 ) {
 	#ifdef USE_TANGENT
 		vec3 pomViewDir = normalize( vTangentView );
 	#else
-		vec3 pomEye = normalize( - vViewPosition );
+		vec3 pomEye = normalize( vViewPosition );
 		vec3 pomSurfNormal = normalize( vNormal );
 		#ifdef DOUBLE_SIDED
 			pomSurfNormal *= ( gl_FrontFacing ? 1.0 : - 1.0 );
@@ -564,14 +570,76 @@ if ( uPomEnabled > 0.5 && uPomDepthScale > 0.0 ) {
       );
     }
 
-    // 5. Replace normalMap sampling for standard Three.js materials without LabPBR hook
-    if (
-      shader.fragmentShader.includes("texture2D( normalMap, vNormalMapUv )") &&
-      !shader.fragmentShader.includes("labpbrNormalTex")
-    ) {
+    // 5. Replace standard map sampling for standard Three.js materials without LabPBR hook
+    const isLabPBR = Boolean(material.userData?.isLabPBR || material.defines?.USE_LABPBR_NORMAL);
+    const shaderChunks = THREE?.ShaderChunk || THREE_DEFAULT?.ShaderChunk || {};
+    if (!isLabPBR && shader.fragmentShader.includes("#include <normal_fragment_maps>")) {
+      const normalChunk = (shaderChunks.normal_fragment_maps || "")
+        .replaceAll("vNormalMapUv", "pomUv");
       shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <normal_fragment_maps>",
+        normalChunk
+      );
+    } else if (shader.fragmentShader.includes("texture2D( normalMap, vNormalMapUv )") && !shader.fragmentShader.includes("labpbrNormalTex")) {
+      shader.fragmentShader = shader.fragmentShader.replaceAll(
         "texture2D( normalMap, vNormalMapUv )",
         "texture2D( normalMap, pomUv )"
+      );
+    }
+
+    if (!isLabPBR && shader.fragmentShader.includes("#include <roughnessmap_fragment>")) {
+      const roughnessChunk = (shaderChunks.roughnessmap_fragment || "")
+        .replaceAll("vRoughnessMapUv", "pomUv");
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <roughnessmap_fragment>",
+        roughnessChunk
+      );
+    } else if (shader.fragmentShader.includes("texture2D( roughnessMap, vRoughnessMapUv )") && !shader.fragmentShader.includes("USE_LABPBR_SPECULAR")) {
+      shader.fragmentShader = shader.fragmentShader.replaceAll(
+        "texture2D( roughnessMap, vRoughnessMapUv )",
+        "texture2D( roughnessMap, pomUv )"
+      );
+    }
+
+    if (shader.fragmentShader.includes("#include <metalnessmap_fragment>")) {
+      const metalnessChunk = (shaderChunks.metalnessmap_fragment || "")
+        .replaceAll("vMetalnessMapUv", "pomUv");
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <metalnessmap_fragment>",
+        metalnessChunk
+      );
+    } else if (shader.fragmentShader.includes("texture2D( metalnessMap, vMetalnessMapUv )") && !shader.fragmentShader.includes("USE_LABPBR_SPECULAR")) {
+      shader.fragmentShader = shader.fragmentShader.replaceAll(
+        "texture2D( metalnessMap, vMetalnessMapUv )",
+        "texture2D( metalnessMap, pomUv )"
+      );
+    }
+
+    if (shader.fragmentShader.includes("#include <emissivemap_fragment>")) {
+      const emissiveChunk = (shaderChunks.emissivemap_fragment || "")
+        .replaceAll("vEmissiveMapUv", "pomUv");
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <emissivemap_fragment>",
+        emissiveChunk
+      );
+    } else if (shader.fragmentShader.includes("texture2D( emissiveMap, vEmissiveMapUv )")) {
+      shader.fragmentShader = shader.fragmentShader.replaceAll(
+        "texture2D( emissiveMap, vEmissiveMapUv )",
+        "texture2D( emissiveMap, pomUv )"
+      );
+    }
+
+    if (shader.fragmentShader.includes("#include <aomap_fragment>")) {
+      const aoChunk = (shaderChunks.aomap_fragment || "")
+        .replaceAll("vAoMapUv", "pomUv");
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <aomap_fragment>",
+        aoChunk
+      );
+    } else if (shader.fragmentShader.includes("texture2D( aoMap, vAoMapUv )")) {
+      shader.fragmentShader = shader.fragmentShader.replaceAll(
+        "texture2D( aoMap, vAoMapUv )",
+        "texture2D( aoMap, pomUv )"
       );
     }
 

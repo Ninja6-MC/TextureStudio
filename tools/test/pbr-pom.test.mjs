@@ -386,3 +386,87 @@ test("createLabPBRMaterial integrates POM configuration cleanly", () => {
     "LabPBR specular map must sample at displaced pomUv when POM is active"
   );
 });
+
+
+test("applyPOM uses correct view vector sign for pomEye in fragment shader", () => {
+  const material = new THREE.MeshStandardMaterial();
+  applyPOM(material);
+
+  const shader = {
+    uniforms: THREE.UniformsUtils.clone(THREE.ShaderLib.standard.uniforms),
+    vertexShader: THREE.ShaderLib.standard.vertexShader,
+    fragmentShader: THREE.ShaderLib.standard.fragmentShader
+  };
+
+  material.onBeforeCompile(shader);
+
+  assert.ok(
+    shader.fragmentShader.includes("vec3 pomEye = normalize( vViewPosition );"),
+    "Fragment shader must compute pomEye as normalize(vViewPosition) pointing towards camera"
+  );
+  assert.equal(
+    shader.fragmentShader.includes("normalize( - vViewPosition )"),
+    false,
+    "Fragment shader must not negate vViewPosition which would invert tangent view ray"
+  );
+});
+
+test("applyPOM resolves boolean options.pom correctly", () => {
+  const matDisabled = new THREE.MeshStandardMaterial();
+  applyPOM(matDisabled, { pom: false, depthScale: 0.1 });
+  assert.equal(matDisabled.userData.pomEnabled, false, "pom: false must set pomEnabled to false");
+
+  const shader = {
+    uniforms: THREE.UniformsUtils.clone(THREE.ShaderLib.standard.uniforms),
+    vertexShader: THREE.ShaderLib.standard.vertexShader,
+    fragmentShader: THREE.ShaderLib.standard.fragmentShader
+  };
+  matDisabled.onBeforeCompile(shader);
+  assert.equal(shader.uniforms.uPomEnabled.value, 0.0, "Uniform uPomEnabled must be 0.0 when pom: false");
+
+  const matEnabled = new THREE.MeshStandardMaterial();
+  applyPOM(matEnabled, { pom: true, depthScale: 0.15 });
+  assert.equal(matEnabled.userData.pomEnabled, true, "pom: true must set pomEnabled to true");
+  const shaderEnabled = {
+    uniforms: THREE.UniformsUtils.clone(THREE.ShaderLib.standard.uniforms),
+    vertexShader: THREE.ShaderLib.standard.vertexShader,
+    fragmentShader: THREE.ShaderLib.standard.fragmentShader
+  };
+  matEnabled.onBeforeCompile(shaderEnabled);
+  assert.equal(shaderEnabled.uniforms.uPomEnabled.value, 1.0, "Uniform uPomEnabled must be 1.0 when pom: true");
+});
+
+test("applyPOM remaps roughness, metalness, and normal maps on standard Three.js materials", () => {
+  const normalMap = new THREE.Texture();
+  const roughnessMap = new THREE.Texture();
+  const metalnessMap = new THREE.Texture();
+
+  const standardMaterial = new THREE.MeshStandardMaterial({
+    normalMap,
+    roughnessMap,
+    metalnessMap
+  });
+
+  applyPOM(standardMaterial);
+
+  const shader = {
+    uniforms: THREE.UniformsUtils.clone(THREE.ShaderLib.standard.uniforms),
+    vertexShader: THREE.ShaderLib.standard.vertexShader,
+    fragmentShader: THREE.ShaderLib.standard.fragmentShader
+  };
+
+  standardMaterial.onBeforeCompile(shader);
+
+  assert.ok(
+    shader.fragmentShader.includes("texture2D( normalMap, pomUv )"),
+    "Standard material normal map must sample at pomUv"
+  );
+  assert.ok(
+    shader.fragmentShader.includes("texture2D( roughnessMap, pomUv )"),
+    "Standard material roughness map must sample at pomUv"
+  );
+  assert.ok(
+    shader.fragmentShader.includes("texture2D( metalnessMap, pomUv )"),
+    "Standard material metalness map must sample at pomUv"
+  );
+});
