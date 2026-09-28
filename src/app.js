@@ -1,9 +1,15 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { preloadStandardColormaps, getBiomeTint, getBiomeData } from "./modules/biome-engine.js";
+import { BIOME_PRESETS, getBiomeSwatch, formatBiomeCoordinates, shouldApplyGrassTint, shouldCompositeSideOverlay, compositeGrassSideBuffers } from "./modules/biome-ui.js";
+import { LIGHTING_PRESETS, createLightingRig, applyLightingPreset } from "./modules/lighting-presets.js";
+import { applyPOM, clampDepthScale, POM_DEFAULT_DEPTH_SCALE } from "./modules/pbr-pom.js";
+import { createLabPBRMaterial, applyLabPBRShader } from "./modules/pbr-material.js";
+import { isPlantOrCrossBlock, createCrossQuadGeometry, cullMultiblockFaces } from "./modules/block-culling.js";
+import { configureTextureColorSpace } from "./modules/color-space.js";
+import { attachLiveSync } from "./modules/live-sync.js";
 
 const STORAGE_KEY = "ninja6_studio_settings_v1";
-
-// Minecraft Plains Biome Grass Tint Color
 const PLAINS_GRASS_TINT = new THREE.Color(0x79c05a);
 
 function createAdaptiveMultiblocks() {
@@ -130,6 +136,13 @@ class TextureStudioApp {
     this.cacheBustTimestamp = Date.now();
     this.viewports = [];
 
+    this.currentBiome = "plains";
+    this.currentLightingPreset = "trailer-golden-hour";
+    this.isPomEnabled = true;
+    this.pomDepthScale = POM_DEFAULT_DEPTH_SCALE;
+
+    preloadStandardColormaps();
+
     this.initDOM();
     this.loadPersistedSettings();
 
@@ -163,6 +176,10 @@ class TextureStudioApp {
         if (typeof parsed.showOverlays === "boolean") this.showOverlays = parsed.showOverlays;
         else if (typeof parsed.showGrassOverhang === "boolean") this.showOverlays = parsed.showGrassOverhang;
         if (typeof parsed.showGrid === "boolean") this.showGrid = parsed.showGrid;
+        if (typeof parsed.currentBiome === "string") this.currentBiome = parsed.currentBiome;
+        if (typeof parsed.currentLightingPreset === "string") this.currentLightingPreset = parsed.currentLightingPreset;
+        if (typeof parsed.isPomEnabled === "boolean") this.isPomEnabled = parsed.isPomEnabled;
+        if (typeof parsed.pomDepthScale === "number") this.pomDepthScale = clampDepthScale(parsed.pomDepthScale);
       }
     } catch (e) {
       console.warn("Could not load persisted settings:", e);
@@ -180,7 +197,11 @@ class TextureStudioApp {
         isSyncMotion: this.isSyncMotion,
         isWireframe: this.isWireframe,
         showOverlays: this.showOverlays,
-        showGrid: this.showGrid
+        showGrid: this.showGrid,
+        currentBiome: this.currentBiome,
+        currentLightingPreset: this.currentLightingPreset,
+        isPomEnabled: this.isPomEnabled,
+        pomDepthScale: this.pomDepthScale
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
     } catch (e) {
@@ -206,6 +227,14 @@ class TextureStudioApp {
       this.dom.btnToggleOverlay.textContent = this.showOverlays ? "Overlays: ON" : "Overlays: OFF";
     }
     this.dom.btnGrid.classList.toggle("active", this.showGrid);
+    if (this.dom.biomeSelect) this.dom.biomeSelect.value = this.currentBiome;
+    if (this.dom.lightingSelect) this.dom.lightingSelect.value = this.currentLightingPreset;
+    if (this.dom.btnTogglePom) {
+      this.dom.btnTogglePom.classList.toggle("active", this.isPomEnabled);
+      this.dom.btnTogglePom.textContent = this.isPomEnabled ? "POM: ON" : "POM: OFF";
+    }
+    if (this.dom.pomDepth) this.dom.pomDepth.value = this.pomDepthScale;
+    if (this.dom.pomDepthVal) this.dom.pomDepthVal.textContent = Number(this.pomDepthScale).toFixed(2);
   }
 
   async loadAllSets() {
@@ -336,6 +365,11 @@ class TextureStudioApp {
         document.getElementById("hud-target-2"),
         document.getElementById("hud-target-3")
       ],
+      biomeSelect: document.getElementById("biome-select"),
+      lightingSelect: document.getElementById("lighting-select"),
+      btnTogglePom: document.getElementById("btn-toggle-pom"),
+      pomDepth: document.getElementById("pom-depth"),
+      pomDepthVal: document.getElementById("pom-depth-val"),
       btnOpenExport: document.getElementById("btn-open-export"),
       exportModal: document.getElementById("export-modal"),
       btnCloseModal: document.getElementById("btn-close-modal"),
@@ -371,23 +405,7 @@ class TextureStudioApp {
       controls.maxPolarAngle = Math.PI;
       controls.minPolarAngle = 0;
 
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
-      scene.add(ambientLight);
-
-      const dirLight = new THREE.DirectionalLight(0xfffaf0, 1.6);
-      dirLight.position.set(5, 10, 7);
-      dirLight.castShadow = true;
-      dirLight.shadow.mapSize.width = 2048;
-      dirLight.shadow.mapSize.height = 2048;
-      scene.add(dirLight);
-
-      const fillLight = new THREE.DirectionalLight(0x7da4c7, 0.4);
-      fillLight.position.set(-5, 2, -5);
-      scene.add(fillLight);
-
-      const bottomLight = new THREE.DirectionalLight(0xffeedd, 0.6);
-      bottomLight.position.set(0, -8, 0);
-      scene.add(bottomLight);
+      const lightingRig = createLightingRig(scene, { preset: this.currentLightingPreset });
 
       const grid = new THREE.GridHelper(20, 20, gridColors[i], 0x202730);
       grid.position.set(0.5, -0.501, 0.5);
@@ -403,7 +421,7 @@ class TextureStudioApp {
         }
       });
 
-      this.viewports.push({ scene, camera, renderer, controls, group, grid });
+      this.viewports.push({ scene, camera, renderer, controls, group, grid, lightingRig });
     }
   }
 
@@ -605,6 +623,81 @@ class TextureStudioApp {
       this.dom.btnGrid.classList.toggle("active", this.showGrid);
       this.viewports.forEach((vp) => (vp.grid.visible = this.showGrid));
     });
+
+    // Biome Selector
+    if (this.dom.biomeSelect) {
+      this.dom.biomeSelect.addEventListener("change", (e) => {
+        this.currentBiome = e.target.value;
+        this.saveSettings();
+        for (const key of Array.from(this.textureCache.keys())) {
+          if (typeof key === "string" && key.startsWith("comp_")) {
+            this.textureCache.delete(key);
+          }
+        }
+        this.render3DObjects();
+      });
+    }
+
+    // Lighting Preset Selector
+    if (this.dom.lightingSelect) {
+      this.dom.lightingSelect.addEventListener("change", (e) => {
+        this.currentLightingPreset = e.target.value;
+        this.saveSettings();
+        this.viewports.forEach((vp) => {
+          if (vp.lightingRig) {
+            applyLightingPreset(vp.lightingRig, this.currentLightingPreset);
+          }
+        });
+      });
+    }
+
+    // POM Toggle
+    if (this.dom.btnTogglePom) {
+      this.dom.btnTogglePom.addEventListener("click", () => {
+        this.isPomEnabled = !this.isPomEnabled;
+        this.saveSettings();
+        this.dom.btnTogglePom.classList.toggle("active", this.isPomEnabled);
+        this.dom.btnTogglePom.textContent = this.isPomEnabled ? "POM: ON" : "POM: OFF";
+        this.updatePOM();
+      });
+    }
+
+    // POM Depth Slider
+    if (this.dom.pomDepth) {
+      this.dom.pomDepth.addEventListener("input", (e) => {
+        const val = parseFloat(e.target.value);
+        this.pomDepthScale = clampDepthScale(val);
+        if (this.dom.pomDepthVal) {
+          this.dom.pomDepthVal.textContent = Number(this.pomDepthScale).toFixed(2);
+        }
+        this.saveSettings();
+        this.updatePOM();
+      });
+    }
+
+    // Live Sync
+    this.liveSync = attachLiveSync(this);
+  }
+
+  updatePOM() {
+    this.viewports.forEach((vp) => {
+      vp.group.traverse((child) => {
+        if (child.isMesh && child.material) {
+          const mats = Array.isArray(child.material) ? child.material : [child.material];
+          mats.forEach((mat) => {
+            if (mat.userData) {
+              mat.userData.pomEnabled = this.isPomEnabled;
+              mat.userData.pomDepthScale = this.pomDepthScale;
+            }
+            if (mat.uniforms) {
+              if (mat.uniforms.uPomEnabled) mat.uniforms.uPomEnabled.value = this.isPomEnabled;
+              if (mat.uniforms.uPomDepthScale) mat.uniforms.uPomDepthScale.value = this.pomDepthScale;
+            }
+            mat.needsUpdate = true;
+          });
+        }
+      });
+    });
   }
 
   bindExportEvents() {
@@ -803,7 +896,7 @@ class TextureStudioApp {
         texture.magFilter = targetSize <= 64 ? THREE.NearestFilter : THREE.LinearFilter;
         texture.minFilter = THREE.LinearMipmapLinearFilter;
         texture.generateMipmaps = true;
-        texture.colorSpace = THREE.SRGBColorSpace;
+        configureTextureColorSpace(texture, "albedo");
         texture.wrapS = THREE.RepeatWrapping;
         texture.wrapT = THREE.RepeatWrapping;
         texture.needsUpdate = true;
@@ -819,7 +912,7 @@ class TextureStudioApp {
   }
 
   async loadCompositedGrassSideTexture(baseSideUrl, overlayUrl) {
-    const cacheKey = `comp_${baseSideUrl}_${overlayUrl}_${this.currentResolution}_${this.cacheBustTimestamp}`;
+    const cacheKey = `comp_${baseSideUrl}_${overlayUrl}_${this.currentResolution}_${this.currentBiome}_${this.cacheBustTimestamp}`;
     if (this.textureCache.has(cacheKey)) {
       return this.textureCache.get(cacheKey);
     }
@@ -834,44 +927,39 @@ class TextureStudioApp {
 
       overlayImg.onload = () => {
         const targetSize = this.currentResolution === "vector" ? (overlayImg.naturalWidth || 512) : parseInt(this.currentResolution, 10) || 512;
+
+        const baseCanvas = document.createElement("canvas");
+        baseCanvas.width = targetSize;
+        baseCanvas.height = targetSize;
+        const baseCtx = baseCanvas.getContext("2d");
+        if (baseTex && baseTex.image) {
+          baseCtx.drawImage(baseTex.image, 0, 0, targetSize, targetSize);
+        }
+        const baseImgData = baseCtx.getImageData(0, 0, targetSize, targetSize);
+
+        const overCanvas = document.createElement("canvas");
+        overCanvas.width = targetSize;
+        overCanvas.height = targetSize;
+        const overCtx = overCanvas.getContext("2d");
+        overCtx.drawImage(overlayImg, 0, 0, targetSize, targetSize);
+        const overImgData = overCtx.getImageData(0, 0, targetSize, targetSize);
+
+        const tintRgb = getBiomeTint(this.currentBiome, "grass");
+        const composited = compositeGrassSideBuffers(baseImgData.data, overImgData.data, tintRgb, targetSize, targetSize);
+
         const canvas = document.createElement("canvas");
         canvas.width = targetSize;
         canvas.height = targetSize;
         const ctx = canvas.getContext("2d");
-
-        // 1. Draw base side (dirt)
-        if (baseTex && baseTex.image) {
-          ctx.drawImage(baseTex.image, 0, 0, targetSize, targetSize);
-        }
-
-        // 2. Create tinted overlay canvas with Plains biome color via exact luminance multiplication
-        const tintCanvas = document.createElement("canvas");
-        tintCanvas.width = targetSize;
-        tintCanvas.height = targetSize;
-        const tintCtx = tintCanvas.getContext("2d");
-        tintCtx.drawImage(overlayImg, 0, 0, targetSize, targetSize);
-        const imgData = tintCtx.getImageData(0, 0, targetSize, targetSize);
-        const d = imgData.data;
-        const tr = 0x79 / 255;
-        const tg = 0xc0 / 255;
-        const tb = 0x5a / 255;
-        for (let i = 0; i < d.length; i += 4) {
-          if (d[i + 3] > 0) {
-            d[i] = Math.round(d[i] * tr);
-            d[i + 1] = Math.round(d[i + 1] * tg);
-            d[i + 2] = Math.round(d[i + 2] * tb);
-          }
-        }
-        tintCtx.putImageData(imgData, 0, 0);
-
-        // 3. Composite tinted grass overlay on top of dirt
-        ctx.drawImage(tintCanvas, 0, 0, targetSize, targetSize);
+        const outImgData = ctx.createImageData(targetSize, targetSize);
+        outImgData.data.set(composited);
+        ctx.putImageData(outImgData, 0, 0);
 
         const texture = new THREE.CanvasTexture(canvas);
         texture.magFilter = targetSize <= 64 ? THREE.NearestFilter : THREE.LinearFilter;
         texture.minFilter = THREE.LinearMipmapLinearFilter;
         texture.generateMipmaps = true;
-        texture.colorSpace = THREE.SRGBColorSpace;
+        configureTextureColorSpace(texture, "albedo");
         texture.wrapS = THREE.RepeatWrapping;
         texture.wrapT = THREE.RepeatWrapping;
         texture.needsUpdate = true;
@@ -893,9 +981,9 @@ class TextureStudioApp {
       ? (blockDef.textures.bottom || "textures/dirt.svg")
       : (blockDef.textures.side || fallbackTex);
 
-    const isGrassBlockWithOverlay = blockDef.id === "grass_block" && isExternal && blockDef.textures.side_overlay && this.showOverlays;
+    const canCompositeSide = shouldCompositeSideOverlay(blockDef.id, blockDef.textures.side_overlay, this.showOverlays);
 
-    const sidePromise = isGrassBlockWithOverlay
+    const sidePromise = canCompositeSide
       ? this.loadCompositedGrassSideTexture(sideTex, blockDef.textures.side_overlay)
       : this.loadTexture(sideTex);
 
@@ -916,19 +1004,22 @@ class TextureStudioApp {
 
     loaded = loaded.map((tex) => tex || validTex);
 
-    const isGrassBlock = blockDef.id === "grass_block";
+    const biomeTint = getBiomeTint(this.currentBiome, "grass");
+    const biomeColor = new THREE.Color(biomeTint[0], biomeTint[1], biomeTint[2]);
 
     return loaded.map((tex, faceIdx) => {
-      // In Minecraft Java, face index 2 is Top (+Y).
-      // If rendering grass block on Vanilla/Faithful (which is greyscale), apply Plains biome tint!
-      const shouldTintTop = isGrassBlock && isExternal && faceIdx === 2;
+      const shouldTintTop = shouldApplyGrassTint(blockDef.id, faceIdx);
 
-      return new THREE.MeshStandardMaterial({
+      return createLabPBRMaterial({
         map: tex,
-        color: shouldTintTop ? PLAINS_GRASS_TINT : 0xffffff,
+        color: shouldTintTop ? biomeColor : 0xffffff,
         roughness: 0.8,
         metalness: 0.1,
-        wireframe: this.isWireframe
+        wireframe: this.isWireframe,
+        THREE,
+        pom: true,
+        pomEnabled: this.isPomEnabled,
+        pomDepthScale: this.pomDepthScale
       });
     });
   }
@@ -1037,6 +1128,38 @@ class TextureStudioApp {
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.set(0, 0, 0);
       group.add(mesh);
+    } else if (isPlantOrCrossBlock(blockDef.id)) {
+      const texUrl = blockDef.textures.all || blockDef.textures.cross || blockDef.textures.top || blockDef.textures.side;
+      const tex = await this.loadTexture(texUrl);
+      if (!tex) {
+        this.renderMissingPlaceholder(group);
+        return;
+      }
+      const geo = createCrossQuadGeometry({ center: true, three: THREE });
+      const normId = (blockDef.id || "").replace(/^minecraft:/, "").toLowerCase();
+      const needsBiomeTint = normId.includes("grass") || normId.includes("fern");
+      const biomeTint = getBiomeTint(this.currentBiome, "grass");
+      const tintColor = needsBiomeTint ? new THREE.Color(biomeTint[0], biomeTint[1], biomeTint[2]) : new THREE.Color(0xffffff);
+
+      const mat = createLabPBRMaterial({
+        map: tex,
+        color: tintColor,
+        transparent: true,
+        alphaTest: 0.1,
+        side: THREE.DoubleSide,
+        roughness: 0.8,
+        metalness: 0.1,
+        wireframe: this.isWireframe,
+        THREE,
+        pom: true,
+        pomEnabled: this.isPomEnabled,
+        pomDepthScale: this.pomDepthScale
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(0, 0, 0);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      group.add(mesh);
     } else {
       const materials = await this.getMaterialsForBlock(blockDef, isExternal);
       if (!materials) {
@@ -1072,13 +1195,10 @@ class TextureStudioApp {
     currentSet.blocks.forEach((b) => blockDefsMap.set(b.id, b));
     const boxGeo = new THREE.BoxGeometry(1, 1, 1);
     const pathGeo = new THREE.BoxGeometry(1, 0.9375, 1);
-    // Minecraft UV mapping for dirt_path: side faces crop top 1/16th (UV v from 0 to 15/16)
     const uvAttr = pathGeo.attributes.uv;
-    // In Three.js BoxGeometry: faces 0, 1 (px, nx), 4, 5 (pz, nz) are the side faces
-    // Each quad has 4 vertices (8 UV coordinates). Top vertices have v = 1, adjust to v = 15/16 (0.9375)
     for (let i = 0; i < uvAttr.count; i++) {
       const faceIdx = Math.floor(i / 4);
-      if (faceIdx !== 2 && faceIdx !== 3) { // not top (2) and not bottom (3)
+      if (faceIdx !== 2 && faceIdx !== 3) {
         if (uvAttr.getY(i) === 1) {
           uvAttr.setY(i, 0.9375);
         }
@@ -1086,8 +1206,29 @@ class TextureStudioApp {
     }
     uvAttr.needsUpdate = true;
 
-    for (const item of multiDef.blocks) {
+    const resolvedBlocks = multiDef.blocks.map((item) => {
       const targetId = (item.blockId === "$SELECTED" && primaryBlock) ? primaryBlock.id : item.blockId;
+      return {
+        ...item,
+        id: targetId,
+        pos: item.pos
+      };
+    });
+
+    const cullingResult = cullMultiblockFaces(resolvedBlocks);
+
+    const FACE_TO_GROUP_INDEX = {
+      east: 0,
+      west: 1,
+      up: 2,
+      down: 3,
+      south: 4,
+      north: 5
+    };
+
+    for (let i = 0; i < multiDef.blocks.length; i++) {
+      const item = multiDef.blocks[i];
+      const targetId = resolvedBlocks[i].id;
       const bDef = blockDefsMap.get(targetId);
       if (!bDef) {
         this.renderMissingPlaceholder(group, item.pos);
@@ -1110,14 +1251,64 @@ class TextureStudioApp {
         const mesh = new THREE.Mesh(geo, mat);
         mesh.position.set(item.pos[0], item.pos[1], item.pos[2]);
         group.add(mesh);
+      } else if (isPlantOrCrossBlock(bDef.id)) {
+        const texUrl = bDef.textures.all || bDef.textures.cross || bDef.textures.top || bDef.textures.side;
+        const tex = await this.loadTexture(texUrl);
+        if (!tex) {
+          this.renderMissingPlaceholder(group, item.pos);
+          continue;
+        }
+        const geo = createCrossQuadGeometry({ center: true, three: THREE });
+        const normId = (bDef.id || "").replace(/^minecraft:/, "").toLowerCase();
+        const needsBiomeTint = normId.includes("grass") || normId.includes("fern");
+        const biomeTint = getBiomeTint(this.currentBiome, "grass");
+        const tintColor = needsBiomeTint ? new THREE.Color(biomeTint[0], biomeTint[1], biomeTint[2]) : new THREE.Color(0xffffff);
+
+        const mat = createLabPBRMaterial({
+          map: tex,
+          color: tintColor,
+          transparent: true,
+          alphaTest: 0.1,
+          side: THREE.DoubleSide,
+          roughness: 0.8,
+          metalness: 0.1,
+          wireframe: this.isWireframe,
+          THREE,
+          pom: true,
+          pomEnabled: this.isPomEnabled,
+          pomDepthScale: this.pomDepthScale
+        });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(item.pos[0], item.pos[1], item.pos[2]);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        group.add(mesh);
       } else {
+        const bReport = cullingResult.blocks ? cullingResult.blocks[i] : null;
+        if (bReport && bReport.retainedCount === 0) {
+          continue;
+        }
+
         const materials = await this.getMaterialsForBlock(bDef, currentSet.isExternal);
         if (!materials) {
           this.renderMissingPlaceholder(group, item.pos);
           continue;
         }
+
         const isPath = bDef.id === "dirt_path";
-        const cube = new THREE.Mesh(isPath ? pathGeo : boxGeo, materials);
+        const geo = isPath ? pathGeo.clone() : boxGeo.clone();
+
+        if (bReport && Array.isArray(bReport.culledFaces) && bReport.culledFaces.length > 0) {
+          const culledSet = new Set(bReport.culledFaces);
+          geo.groups = geo.groups.filter((grp) => {
+            const faceName = Object.keys(FACE_TO_GROUP_INDEX).find(
+              (key) => FACE_TO_GROUP_INDEX[key] === grp.materialIndex
+            );
+            return !culledSet.has(faceName);
+          });
+        }
+
+        const cube = new THREE.Mesh(geo, materials);
         cube.position.set(item.pos[0], isPath ? item.pos[1] - 0.03125 : item.pos[1], item.pos[2]);
         cube.castShadow = true;
         cube.receiveShadow = true;
@@ -1152,6 +1343,14 @@ class TextureStudioApp {
     });
   }
 }
+
+TextureStudioApp.BIOME_PRESETS = BIOME_PRESETS;
+TextureStudioApp.LIGHTING_PRESETS = LIGHTING_PRESETS;
+TextureStudioApp.getBiomeData = getBiomeData;
+TextureStudioApp.getBiomeSwatch = getBiomeSwatch;
+TextureStudioApp.formatBiomeCoordinates = formatBiomeCoordinates;
+TextureStudioApp.applyPOM = applyPOM;
+TextureStudioApp.applyLabPBRShader = applyLabPBRShader;
 
 window.addEventListener("DOMContentLoaded", () => {
   new TextureStudioApp();
