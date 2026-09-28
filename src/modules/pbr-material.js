@@ -1,5 +1,32 @@
 import * as THREE_DEFAULT from "three";
 import { configureTextureColorSpace } from "./color-space.js";
+import {
+  applyPOM,
+  calculatePomSamples,
+  clampDepthScale,
+  clampPomUv,
+  raymarchHeightLayers,
+  simulatePomRaymarch,
+  POM_DEFAULT_DEPTH_SCALE,
+  POM_DEFAULT_MAX_SAMPLES,
+  POM_DEFAULT_MIN_SAMPLES,
+  POM_MAX_DEPTH_SCALE,
+  POM_MIN_DEPTH_SCALE
+} from "./pbr-pom.js";
+
+export {
+  applyPOM,
+  calculatePomSamples,
+  clampDepthScale,
+  clampPomUv,
+  raymarchHeightLayers,
+  simulatePomRaymarch,
+  POM_DEFAULT_DEPTH_SCALE,
+  POM_DEFAULT_MAX_SAMPLES,
+  POM_DEFAULT_MIN_SAMPLES,
+  POM_MAX_DEPTH_SCALE,
+  POM_MIN_DEPTH_SCALE
+};
 
 /**
  * LabPBR 1.3 Conductor threshold for F0 reflectance.
@@ -287,7 +314,11 @@ uniform float labpbrAoIntensity;
 	#endif
 	normal = normalize( normalMatrix * normal );
 #elif defined( USE_NORMALMAP_TANGENTSPACE )
+	#ifdef USE_POM
+	labpbrNormalTex = texture2D( normalMap, pomUv );
+	#else
 	labpbrNormalTex = texture2D( normalMap, vNormalMapUv );
+	#endif
 	// LabPBR 1.3: Normal X = r, Normal Y = 1.0 - g (DirectX to OpenGL Y-flip)
 	vec2 labpbrNormalXY = vec2( labpbrNormalTex.r * 2.0 - 1.0, ( 1.0 - labpbrNormalTex.g ) * 2.0 - 1.0 );
 	labpbrNormalXY *= normalScale;
@@ -306,7 +337,9 @@ uniform float labpbrAoIntensity;
       shader.fragmentShader = shader.fragmentShader.replace(
         "#include <roughnessmap_fragment>",
         `#ifdef USE_LABPBR_SPECULAR
-	#if defined( USE_UV )
+	#ifdef USE_POM
+		vec2 labpbrSpecUv = pomUv;
+	#elif defined( USE_UV )
 		vec2 labpbrSpecUv = vUv;
 	#elif defined( USE_MAP )
 		vec2 labpbrSpecUv = vMapUv;
@@ -383,6 +416,18 @@ uniform float labpbrAoIntensity;
     return parentKey ? `${parentKey}|${labpbrKey}` : labpbrKey;
   };
 
+  const isPomRequested = Boolean(
+    options.pom ||
+    options.pomEnabled ||
+    material.userData?.pomEnabled ||
+    options.depthScale !== undefined ||
+    options.pomDepthScale !== undefined
+  );
+  if (isPomRequested) {
+    const pomOpts = typeof options.pom === "object" ? { ...options, ...options.pom } : options;
+    applyPOM(material, pomOpts);
+  }
+
   return material;
 }
 
@@ -419,6 +464,14 @@ export function createLabPBRMaterial(options = {}) {
     usePhysical = false,
     THREE: injectedThree = null,
     MaterialClass: customMaterialClass = null,
+    pom = false,
+    pomEnabled,
+    depthScale,
+    pomDepthScale,
+    minSamples,
+    pomMinSamples,
+    maxSamples,
+    pomMaxSamples,
     ...restOptions
   } = options;
 
@@ -474,7 +527,15 @@ export function createLabPBRMaterial(options = {}) {
     normalMap: baseNormalMap,
     specularMap: baseSpecularMap,
     aoIntensity,
-    emissiveIntensity
+    emissiveIntensity,
+    pom,
+    pomEnabled,
+    depthScale,
+    pomDepthScale,
+    minSamples,
+    pomMinSamples,
+    maxSamples,
+    pomMaxSamples
   });
 
   return material;
