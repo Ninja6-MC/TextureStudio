@@ -12,6 +12,8 @@ const ROOT_DIR = path.resolve(__dirname, "..");
 const CACHE_DIR = path.join(ROOT_DIR, "cache", "packs");
 const DIST_DIR = path.join(ROOT_DIR, "dist");
 const PORT = process.env.PORT || 3000;
+const isDirectRun = Boolean(process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url));
+const isTestEnv = process.env.NODE_ENV === "test" || process.argv.includes("--test") || process.argv.some((a) => a.includes("test"));
 
 let texturesDir = null;
 let packsFolder = null;
@@ -62,6 +64,7 @@ if (!fs.existsSync(DIST_DIR)) {
 }
 
 function discoverVanillaJar() {
+  if (isTestEnv && !isDirectRun) return null;
   const versionsDir = path.join(appData, ".minecraft", "versions");
   if (!fs.existsSync(versionsDir)) return null;
 
@@ -132,6 +135,7 @@ function discoverVanillaJar() {
 }
 
 function discoverPacks(folderPath) {
+  if (isTestEnv && !isDirectRun) return [];
   const discovered = [];
 
   const vanilla = discoverVanillaJar();
@@ -313,9 +317,308 @@ const MIME_TYPES = {
   ".ico": "image/x-icon"
 };
 
+/**
+ * Creates an SSE hub managing client streams and event broadcasting.
+ *
+ * @param {object} [options={}]
+ * @param {number} [options.keepAliveIntervalMs=15000] - Interval between keep-alive comments
+ * @returns {object} Hub instance
+ */
+function createSseHub(options = {}) {
+  const clients = new Set();
+  const keepAliveIntervalMs = options.keepAliveIntervalMs ?? 15000;
+  let keepAliveTimer = null;
+
+  function broadcast(event, data) {
+    const payload = typeof data === "string" ? data : JSON.stringify(data);
+    const message = event ? `event: ${event}\ndata: ${payload}\n\n` : `data: ${payload}\n\n`;
+    for (const client of Array.from(clients)) {
+      try {
+        client.write(message);
+      } catch {
+        clients.delete(client);
+      }
+    }
+    return message;
+  }
+
+  function sendKeepAlive() {
+    for (const client of Array.from(clients)) {
+      try {
+        client.write(": keep-alive\n\n");
+      } catch {
+        clients.delete(client);
+      }
+    }
+  }
+
+  function addClient(res, req = null) {
+    clients.add(res);
+
+    const onDisconnect = () => {
+      removeClient(res);
+      res.removeListener("close", onDisconnect);
+      res.removeListener("finish", onDisconnect);
+      res.removeListener("error", onDisconnect);
+      if (req) {
+        req.removeListener("close", onDisconnect);
+        req.removeListener("aborted", onDisconnect);
+        req.removeListener("error", onDisconnect);
+      }
+    };
+
+    res.once("close", onDisconnect);
+    res.once("finish", onDisconnect);
+    res.once("error", onDisconnect);
+    if (req) {
+      req.once("close", onDisconnect);
+      req.once("aborted", onDisconnect);
+      req.once("error", onDisconnect);
+      if (req.socket) req.socket.once("close", onDisconnect);
+    }
+    if (res.socket) res.socket.once("close", onDisconnect);
+
+    return () => onDisconnect();
+  }
+
+  function removeClient(res) {
+    clients.delete(res);
+  }
+
+  function getClientCount() {
+    return clients.size;
+  }
+
+  function startKeepAlive() {
+    if (keepAliveTimer || keepAliveIntervalMs <= 0) return;
+    keepAliveTimer = setInterval(sendKeepAlive, keepAliveIntervalMs);
+    if (keepAliveTimer && typeof keepAliveTimer.unref === "function") {
+      keepAliveTimer.unref();
+    }
+  }
+
+  function stopKeepAlive() {
+    if (keepAliveTimer) {
+      clearInterval(keepAliveTimer);
+      keepAliveTimer = null;
+    }
+  }
+
+  function close() {
+    stopKeepAlive();
+    for (const client of Array.from(clients)) {
+      try {
+        client.end();
+      } catch {}
+    }
+    clients.clear();
+  }
+
+  startKeepAlive();
+
+  return {
+    clients,
+    broadcast,
+    sendKeepAlive,
+    addClient,
+    removeClient,
+    getClientCount,
+    startKeepAlive,
+    stopKeepAlive,
+    close
+  };
+}
+
+/**
+ * Handles incoming SSE /api/events requests.
+ *
+ * @param {http.IncomingMessage} req
+ * @param {http.ServerResponse} res
+ * @param {object} [hub=sseHub]
+ * @returns {boolean}
+ */
+function handleEventsRequest(req, res, hub = sseHub) {
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Cache-Control"
+    });
+    res.end();
+    return true;
+  }
+
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    res.writeHead(405, {
+      "Content-Type": "text/plain",
+      "Allow": "GET, HEAD, OPTIONS",
+      "Access-Control-Allow-Origin": "*"
+    });
+    res.end("405 Method Not Allowed");
+    return true;
+  }
+
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    "Connection": "keep-alive",
+    "Access-Control-Allow-Origin": "*"
+  });
+
+  if (req.method === "HEAD") {
+    res.end();
+    return true;
+  }
+
+  // Initial comment to verify live SSE connection
+  res.write(": keep-alive\n\n");
+
+  if (hub) {
+    hub.addClient(res, req);
+  }
+
+  return true;
+}
+
+/**
+ * Broadcasts a texture reload event to all connected SSE clients.
+ *
+ * @param {object} hub - SSE hub instance
+ * @param {object} [data={}] - Change event payload
+ * @param {string} [eventName='change'] - SSE event name
+ * @returns {object|null} The sent payload
+ */
+function broadcastReload(hub, data = {}, eventName = "change") {
+  if (!hub) return null;
+  const payload = {
+    type: data.type || eventName,
+    timestamp: Date.now(),
+    ...data
+  };
+  hub.broadcast(eventName, payload);
+  return payload;
+}
+
+/**
+ * Watches texture directories for changes with a 100ms debounce to prevent reload storms.
+ *
+ * @param {string|string[]} dirOrDirs - Directory path or list of directory paths
+ * @param {Function} onBroadcast - Callback invoked when debounced change triggers
+ * @param {number} [debounceMs=100] - Debounce interval in milliseconds
+ * @returns {object} Watcher handle with close() and triggerNow() methods
+ */
+function watchTextureDir(dirOrDirs, onBroadcast, debounceMs = 100) {
+  const dirs = Array.isArray(dirOrDirs) ? dirOrDirs : [dirOrDirs];
+  const watchers = [];
+  const pendingChanges = new Set();
+  let debounceTimer = null;
+
+  function triggerBroadcast() {
+    if (pendingChanges.size === 0) return;
+    const files = Array.from(pendingChanges);
+    pendingChanges.clear();
+
+    const primaryFile = files[0];
+    const ext = primaryFile ? path.extname(primaryFile) : "";
+    const stem = primaryFile ? path.basename(primaryFile, ext) : "";
+
+    const payload = {
+      type: "change",
+      files,
+      filename: primaryFile,
+      stem,
+      timestamp: Date.now()
+    };
+
+    if (typeof onBroadcast === "function") {
+      onBroadcast(payload);
+    }
+  }
+
+  for (const dir of dirs) {
+    if (!dir || !fs.existsSync(dir)) continue;
+
+    const listener = (eventType, filename) => {
+      if (filename) {
+        const base = path.basename(filename);
+        if (base.startsWith(".") || base.endsWith("~") || base.endsWith(".tmp")) {
+          return;
+        }
+        pendingChanges.add(base);
+      } else {
+        pendingChanges.add("textures");
+      }
+
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+      }
+      debounceTimer = setTimeout(() => {
+        debounceTimer = null;
+        triggerBroadcast();
+      }, debounceMs);
+      if (debounceTimer && typeof debounceTimer.unref === "function") {
+        debounceTimer.unref();
+      }
+    };
+
+    try {
+      const watcher = fs.watch(dir, { recursive: false }, listener);
+      watcher.on("error", () => {});
+      watchers.push(watcher);
+    } catch {}
+  }
+
+  return {
+    watchers,
+    pendingChanges,
+    close() {
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+      }
+      for (const w of watchers) {
+        try {
+          w.close();
+        } catch {}
+      }
+      watchers.length = 0;
+    },
+    triggerNow() {
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+      }
+      triggerBroadcast();
+    }
+  };
+}
+
+const watchTextureDirs = watchTextureDir;
+
+const sseHub = createSseHub();
+let textureWatcher = null;
+
+const defaultWatchDirs = [texturesDir];
+const localTexturesDir = path.join(ROOT_DIR, "textures");
+if (fs.existsSync(localTexturesDir) && path.resolve(localTexturesDir) !== path.resolve(texturesDir)) {
+  defaultWatchDirs.push(localTexturesDir);
+}
+
+if (isDirectRun || (!isTestEnv && process.env.NODE_ENV !== "test")) {
+  textureWatcher = watchTextureDir(defaultWatchDirs, (payload) => {
+    broadcastReload(sseHub, payload);
+  });
+}
+
 const server = http.createServer(async (req, res) => {
   const urlObj = new URL(req.url, `http://${req.headers.host || "localhost"}`);
   let reqPath = decodeURIComponent(urlObj.pathname);
+
+  // API Route: /api/events (Live SSE File-Watcher & Auto-Reload)
+  if (reqPath === "/api/events") {
+    handleEventsRequest(req, res, sseHub);
+    return;
+  }
 
   // API Route: /api/pbr/:blockId/:mapType (Dynamic LabPBR 1.3 Normal & Specular Generator)
   if (reqPath.startsWith("/api/pbr/")) {
@@ -423,7 +726,7 @@ server.on("error", (e) => {
   }
 });
 
-if (process.argv[1] === fileURLToPath(import.meta.url) || process.env.NODE_ENV !== "test") {
+if (isDirectRun || (!isTestEnv && process.env.NODE_ENV !== "test")) {
   server.listen(PORT, () => {
   console.log(`\n======================================================`);
   console.log(`  Ninja6 Texture Studio — Multi-Set 3D Engine & Compiler`);
@@ -434,4 +737,18 @@ if (process.argv[1] === fileURLToPath(import.meta.url) || process.env.NODE_ENV !
   });
 }
 
-export { server };
+server.on("close", () => {
+  textureWatcher?.close();
+  sseHub?.close();
+});
+
+export {
+  server,
+  createSseHub,
+  watchTextureDir,
+  watchTextureDirs,
+  broadcastReload,
+  handleEventsRequest,
+  sseHub,
+  texturesDir
+};
