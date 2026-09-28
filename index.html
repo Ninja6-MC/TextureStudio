@@ -72,6 +72,43 @@
             <button id="mode-multi" class="toggle-btn" data-mode="multi">Multiblock 3D</button>
           </div>
         </div>
+
+        <!-- Biome Selector -->
+        <div class="control-item">
+          <label for="biome-select">Biome</label>
+          <select id="biome-select" class="styled-select">
+            <option value="plains">Plains</option>
+            <option value="forest">Forest</option>
+            <option value="birch_forest">Birch Forest</option>
+            <option value="dark_forest">Dark Forest</option>
+            <option value="taiga">Taiga</option>
+            <option value="swamp">Swamp</option>
+            <option value="badlands">Badlands / Mesa</option>
+            <option value="desert">Desert</option>
+            <option value="savanna">Savanna</option>
+            <option value="jungle">Jungle</option>
+            <option value="snowy_plains">Snowy Plains</option>
+          </select>
+        </div>
+
+        <!-- Lighting Preset Selector -->
+        <div class="control-item">
+          <label for="lighting-select">Lighting</label>
+          <select id="lighting-select" class="styled-select">
+            <option value="trailer-golden-hour">Trailer Golden Hour</option>
+            <option value="noon-clear">Noon Clear</option>
+            <option value="studio-neutral">Studio Neutral</option>
+          </select>
+        </div>
+
+        <!-- POM Controls -->
+        <div class="control-item">
+          <button id="btn-toggle-pom" class="action-btn active" title="Toggle Parallax Occlusion Mapping">POM: ON</button>
+        </div>
+        <div class="control-item pom-depth-item">
+          <label for="pom-depth">Depth: <span id="pom-depth-val">0.05</span></label>
+          <input type="range" id="pom-depth" min="0" max="0.2" step="0.01" value="0.05" class="styled-slider">
+        </div>
       </div>
 
       <div class="header-actions">
