@@ -229,8 +229,25 @@ function discoverActivePack(dir) {
     };
   }
 
-  const files = fs.readdirSync(dir).filter((f) => /\.(svg|png)$/i.test(f));
-  const fileSet = new Set(files);
+  // Scan both dir and dir/block (if present)
+  const fileEntries = [];
+  const addFilesFrom = (targetDir, urlPrefix) => {
+    if (!fs.existsSync(targetDir)) return;
+    const entries = fs.readdirSync(targetDir);
+    for (const f of entries) {
+      if (/\.(svg|png)$/i.test(f)) {
+        fileEntries.push({ file: f, url: `${urlPrefix}${f}`, stem: f.replace(/\.(svg|png)$/i, "") });
+      }
+    }
+  };
+
+  addFilesFrom(dir, "textures/");
+  const blockSub = path.join(dir, "block");
+  if (fs.existsSync(blockSub) && fs.statSync(blockSub).isDirectory()) {
+    addFilesFrom(blockSub, "textures/block/");
+  }
+
+  const fileSet = new Set(fileEntries.map((e) => e.file));
   const blocks = new Map();
 
   function formatTitle(id) {
@@ -238,50 +255,52 @@ function discoverActivePack(dir) {
   }
 
   // 1. Multi-part textures
-  for (const file of files) {
-    const stem = file.replace(/\.(svg|png)$/i, "");
+  for (const entry of fileEntries) {
+    const stem = entry.stem;
     if (stem.endsWith("_side_overlay")) {
       const base = stem.replace(/_side_overlay$/, "");
       if (!blocks.has(base)) blocks.set(base, { id: base, textures: {} });
-      blocks.get(base).textures.side_overlay = `textures/${file}`;
+      blocks.get(base).textures.side_overlay = entry.url;
     } else if (stem.endsWith("_top")) {
       const base = stem.replace(/_top$/, "");
       if (!blocks.has(base)) blocks.set(base, { id: base, textures: {} });
-      blocks.get(base).textures.top = `textures/${file}`;
-      if (!blocks.get(base).textures.bottom) blocks.get(base).textures.bottom = `textures/${file}`;
+      blocks.get(base).textures.top = entry.url;
+      if (!blocks.get(base).textures.bottom) blocks.get(base).textures.bottom = entry.url;
     } else if (stem.endsWith("_bottom")) {
       const base = stem.replace(/_bottom$/, "");
       if (!blocks.has(base)) blocks.set(base, { id: base, textures: {} });
-      blocks.get(base).textures.bottom = `textures/${file}`;
+      blocks.get(base).textures.bottom = entry.url;
     } else if (stem.endsWith("_side")) {
       const base = stem.replace(/_side$/, "");
       if (!blocks.has(base)) blocks.set(base, { id: base, textures: {} });
-      blocks.get(base).textures.side = `textures/${file}`;
+      blocks.get(base).textures.side = entry.url;
     }
   }
 
   // 2. Base & standalone textures
-  for (const file of files) {
-    const stem = file.replace(/\.(svg|png)$/i, "");
+  for (const entry of fileEntries) {
+    const stem = entry.stem;
     if (stem.endsWith("_side_overlay") || stem.endsWith("_top") || stem.endsWith("_bottom") || stem.endsWith("_side")) {
       continue;
     }
     if (blocks.has(stem)) {
-      blocks.get(stem).textures.side = `textures/${file}`;
+      blocks.get(stem).textures.side = entry.url;
     } else {
       blocks.set(stem, {
         id: stem,
-        textures: { all: `textures/${file}` }
+        textures: { all: entry.url }
       });
     }
   }
 
   // Special fallbacks (e.g. grass_block / dirt_path dirt bottom)
-  if (blocks.has("grass_block") && !blocks.get("grass_block").textures.bottom && fileSet.has("dirt.svg")) {
-    blocks.get("grass_block").textures.bottom = "textures/dirt.svg";
+  const dirtEntry = fileEntries.find((e) => e.stem === "dirt");
+  const dirtUrl = dirtEntry ? dirtEntry.url : "textures/dirt.svg";
+  if (blocks.has("grass_block") && dirtEntry) {
+    blocks.get("grass_block").textures.bottom = dirtUrl;
   }
-  if (blocks.has("dirt_path") && !blocks.get("dirt_path").textures.bottom && fileSet.has("dirt.svg")) {
-    blocks.get("dirt_path").textures.bottom = "textures/dirt.svg";
+  if (blocks.has("dirt_path") && dirtEntry) {
+    blocks.get("dirt_path").textures.bottom = dirtUrl;
   }
 
   const discoveredBlocks = Array.from(blocks.values()).map((b) => ({
@@ -678,10 +697,14 @@ const server = http.createServer(async (req, res) => {
   // Dynamic Textures Directory Serving (/textures/*)
   if (reqPath.startsWith("/textures/")) {
     const relFile = reqPath.replace(/^\/textures\//, "");
-    const targetFile = path.join(texturesDir, relFile);
+    let targetFile = path.join(texturesDir, relFile);
+    if (!fs.existsSync(targetFile) && fs.existsSync(path.join(texturesDir, "block", relFile))) {
+      targetFile = path.join(texturesDir, "block", relFile);
+    }
     if (fs.existsSync(targetFile) && fs.statSync(targetFile).isFile()) {
+      const ext = path.extname(targetFile).toLowerCase();
       res.writeHead(200, {
-        "Content-Type": "image/svg+xml",
+        "Content-Type": ext === ".png" ? "image/png" : "image/svg+xml",
         "Cache-Control": "no-cache, no-store, must-revalidate",
         "Access-Control-Allow-Origin": "*"
       });
@@ -749,6 +772,7 @@ export {
   watchTextureDirs,
   broadcastReload,
   handleEventsRequest,
+  discoverActivePack,
   sseHub,
   texturesDir
 };

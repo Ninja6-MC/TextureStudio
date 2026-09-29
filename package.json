@@ -12,6 +12,7 @@
     "build:64": "node tools/build-pack.mjs --res 64",
     "build:32": "node tools/build-pack.mjs --res 32",
     "build:all": "node tools/build-pack.mjs --all",
+    "test": "node --test tools/test/*.test.mjs && node tools/test-e2e.mjs",
     "export:icons": "node scripts/export-icons.mjs"
   },
   "keywords": [
@@ -29,7 +30,8 @@
   "license": "GPL-3.0",
   "dependencies": {
     "@resvg/resvg-js": "^2.6.2",
-    "archiver": "^8.0.0"
+    "archiver": "^8.0.0",
+    "three": "^0.186.1"
   },
   "engines": {
     "node": ">=18.0.0"
