@@ -65,7 +65,7 @@ export const LIGHTING_PRESETS = Object.freeze({
       color: "#ffb366",
       colorHex: 0xffb366,
       hex: "#ffb366",
-      intensity: 1.8,
+      intensity: 1.2,
       azimuth: 55,
       elevation: 28,
       distance: 50,
@@ -75,7 +75,7 @@ export const LIGHTING_PRESETS = Object.freeze({
       color: "#8ca0ba",
       colorHex: 0x8ca0ba,
       hex: "#8ca0ba",
-      intensity: 0.6
+      intensity: 0.4
     }),
     fill: null,
     rim: null,
@@ -110,12 +110,12 @@ export const LIGHTING_PRESETS = Object.freeze({
   "studio-neutral": Object.freeze({
     id: "studio-neutral",
     name: "Studio Neutral",
-    description: "Multi-angle diffuse 3-point lighting setup with key, fill, rim/bounce, and ambient illumination.",
+    description: "Multi-angle diffuse 3-point lighting setup with neutral key, fill, bounce, and ambient illumination calibrated for accurate texture inspection.",
     sun: Object.freeze({
-      color: "#fffaf0",
-      colorHex: 0xfffaf0,
-      hex: "#fffaf0",
-      intensity: 1.5,
+      color: "#ffffff",
+      colorHex: 0xffffff,
+      hex: "#ffffff",
+      intensity: 1.0,
       azimuth: 35.54,
       elevation: 49.3,
       distance: 13.19,
@@ -126,46 +126,69 @@ export const LIGHTING_PRESETS = Object.freeze({
       color: "#ffffff",
       colorHex: 0xffffff,
       hex: "#ffffff",
-      intensity: 0.5
+      intensity: 0.4
     }),
     fill: Object.freeze({
-      color: "#7da4c7",
-      colorHex: 0x7da4c7,
-      hex: "#7da4c7",
-      intensity: 0.5,
+      color: "#ffffff",
+      colorHex: 0xffffff,
+      hex: "#ffffff",
+      intensity: 0.3,
       position: Object.freeze([-5, 2, -5])
     }),
     rim: Object.freeze({
-      color: "#ffeedd",
-      colorHex: 0xffeedd,
-      hex: "#ffeedd",
-      intensity: 0.4,
+      color: "#ffffff",
+      colorHex: 0xffffff,
+      hex: "#ffffff",
+      intensity: 0.2,
       position: Object.freeze([0, -8, 0])
     }),
     extraLights: Object.freeze([
       Object.freeze({
         id: "fill",
         type: "directional",
-        color: "#7da4c7",
-        colorHex: 0x7da4c7,
-        hex: "#7da4c7",
-        intensity: 0.5,
+        color: "#ffffff",
+        colorHex: 0xffffff,
+        hex: "#ffffff",
+        intensity: 0.3,
         position: Object.freeze([-5, 2, -5])
       }),
       Object.freeze({
         id: "rim",
         type: "directional",
-        color: "#ffeedd",
-        colorHex: 0xffeedd,
-        hex: "#ffeedd",
-        intensity: 0.4,
+        color: "#ffffff",
+        colorHex: 0xffffff,
+        hex: "#ffffff",
+        intensity: 0.2,
         position: Object.freeze([0, -8, 0])
       })
     ])
   })
 });
 
-export const DEFAULT_LIGHTING_PRESET = "trailer-golden-hour";
+export const DEFAULT_LIGHTING_PRESET = "studio-neutral";
+
+export const DEFAULT_TONE_MAPPING = THREE_DEFAULT.ACESFilmicToneMapping;
+export const DEFAULT_TONE_MAPPING_EXPOSURE = 1.0;
+
+/**
+ * Configures ACES Filmic or AgX tone mapping and exposure on a Three.js WebGLRenderer.
+ *
+ * @param {object} renderer - WebGLRenderer instance
+ * @param {object} [options={}] - Options (toneMapping, exposure, THREE)
+ * @returns {object} The configured renderer
+ */
+export function configureToneMapping(renderer, options = {}) {
+  if (!renderer) {
+    throw new TypeError("configureToneMapping requires a valid WebGLRenderer instance");
+  }
+  const THREE = options?.THREE || (typeof globalThis !== "undefined" && globalThis.THREE) || THREE_DEFAULT;
+  const toneMapping = options.toneMapping ?? THREE.ACESFilmicToneMapping;
+  const exposure = typeof options.exposure === "number" ? options.exposure : (options.toneMappingExposure ?? DEFAULT_TONE_MAPPING_EXPOSURE);
+
+  renderer.toneMapping = toneMapping;
+  renderer.toneMappingExposure = exposure;
+  return renderer;
+}
 
 /**
  * Internal registry lookup map including aliases.
@@ -496,8 +519,8 @@ export class LightingRig {
     this.group = new THREE.Group();
     this.group.name = options.name || "LightingRig";
 
-    // Primary directional sunlight
-    this.sunLight = new THREE.DirectionalLight(0xffb366, 1.8);
+    // Primary directional sunlight / key light
+    this.sunLight = new THREE.DirectionalLight(0xffffff, 1.0);
     this.sunLight.name = "SunLight";
 
     this.sunTarget = new THREE.Object3D();
@@ -516,15 +539,15 @@ export class LightingRig {
     this.sunLight.shadow.bias = options.shadowBias || -0.0005;
 
     // Ambient light
-    this.ambientLight = new THREE.AmbientLight(0x8ca0ba, 0.6);
+    this.ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
     this.ambientLight.name = "AmbientLight";
 
     // Secondary lights (used in 3-point lighting presets like Studio Neutral)
-    this.fillLight = new THREE.DirectionalLight(0x7da4c7, 0.0);
+    this.fillLight = new THREE.DirectionalLight(0xffffff, 0.0);
     this.fillLight.name = "FillLight";
     this.fillLight.visible = false;
 
-    this.rimLight = new THREE.DirectionalLight(0xffeedd, 0.0);
+    this.rimLight = new THREE.DirectionalLight(0xffffff, 0.0);
     this.rimLight.name = "RimLight";
     this.rimLight.visible = false;
 
@@ -538,14 +561,18 @@ export class LightingRig {
       this.scene.add(this.group);
     }
 
-    this.azimuth = 55;
-    this.elevation = 28;
-    this.distance = 50;
+    this.azimuth = 35.54;
+    this.elevation = 49.3;
+    this.distance = 13.19;
     this.currentPresetId = null;
     this.currentPreset = null;
 
     const initialPreset = options.preset || DEFAULT_LIGHTING_PRESET;
     this.setPreset(initialPreset);
+
+    if (options.renderer) {
+      configureToneMapping(options.renderer, options);
+    }
   }
 
   /**
@@ -796,6 +823,10 @@ export function createLightingRig(sceneOrGroup = null, options = {}) {
 export function applyLightingPreset(target, presetIdOrConfig, options = {}) {
   if (!target) {
     throw new TypeError("applyLightingPreset requires a valid target (LightingRig, THREE.Scene, or lighting object)");
+  }
+
+  if (options.renderer) {
+    configureToneMapping(options.renderer, options);
   }
 
   if (target instanceof LightingRig || typeof target.setPreset === "function") {

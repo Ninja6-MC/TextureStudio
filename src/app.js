@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { preloadStandardColormaps, getBiomeTint, getBiomeData } from "./modules/biome-engine.js";
 import { BIOME_PRESETS, getBiomeSwatch, formatBiomeCoordinates, shouldApplyGrassTint, shouldCompositeSideOverlay, compositeGrassSideBuffers } from "./modules/biome-ui.js";
-import { LIGHTING_PRESETS, createLightingRig, applyLightingPreset } from "./modules/lighting-presets.js";
+import { LIGHTING_PRESETS, createLightingRig, applyLightingPreset, DEFAULT_LIGHTING_PRESET } from "./modules/lighting-presets.js";
 import { applyPOM, clampDepthScale, POM_DEFAULT_DEPTH_SCALE } from "./modules/pbr-pom.js";
 import { createLabPBRMaterial, applyLabPBRShader } from "./modules/pbr-material.js";
 import { isPlantOrCrossBlock, createCrossQuadGeometry, cullMultiblockFaces } from "./modules/block-culling.js";
@@ -137,7 +137,7 @@ class TextureStudioApp {
     this.viewports = [];
 
     this.currentBiome = "plains";
-    this.currentLightingPreset = "trailer-golden-hour";
+    this.currentLightingPreset = DEFAULT_LIGHTING_PRESET || "studio-neutral";
     this.isPomEnabled = true;
     this.pomDepthScale = POM_DEFAULT_DEPTH_SCALE;
 
@@ -397,6 +397,8 @@ class TextureStudioApp {
       const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       renderer.shadowMap.enabled = true;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.0;
       this.dom.canvasWrappers[i].appendChild(renderer.domElement);
 
       const controls = new OrbitControls(camera, renderer.domElement);
