@@ -51,6 +51,15 @@ import {
   invalidateTextureCache
 } from "../src/modules/live-sync.js";
 
+import {
+  LIGHTING_PRESETS,
+  DEFAULT_LIGHTING_PRESET,
+  DEFAULT_TONE_MAPPING,
+  DEFAULT_TONE_MAPPING_EXPOSURE,
+  configureToneMapping,
+  createLightingRig
+} from "../src/modules/lighting-presets.js";
+
 /**
  * Deterministic Mock EventSource for client-side SSE verification in Node.js.
  */
@@ -126,7 +135,8 @@ const verificationResults = {
   req1_grassBiomeTintMatch: false,
   req2_labPbrColorSpaceIntegrity: false,
   req3_crossQuadMultiblockCulling: false,
-  req4_liveSyncTouchReload: false
+  req4_liveSyncTouchReload: false,
+  req5_studioInspectionLightingToneMapping: false
 };
 
 const EPSILON = 1e-4;
@@ -788,6 +798,85 @@ test("Requirement 4: Live file reload triggers seamlessly on SVG touch", () => {
 });
 
 // ============================================================================
+// REQUIREMENT 5: Studio Inspection Lighting Calibration & ACES Tone Mapping
+// ============================================================================
+test("Requirement 5: Studio inspection lighting and ACES tone mapping prevent color blowout", async () => {
+  // 1. Default preset must be studio-neutral
+  assert.equal(
+    DEFAULT_LIGHTING_PRESET,
+    "studio-neutral",
+    "Default lighting preset must be studio-neutral for accurate inspection"
+  );
+
+  // 2. Studio Neutral preset inspection calibration
+  const studioPreset = LIGHTING_PRESETS["studio-neutral"];
+  assert.ok(studioPreset, "studio-neutral preset must exist");
+  assert.equal(studioPreset.sun.hex, "#ffffff", "Studio Neutral key light must be pure neutral white");
+  assert.equal(studioPreset.ambient.hex, "#ffffff", "Studio Neutral ambient light must be pure neutral white");
+  assert.equal(studioPreset.fill.hex, "#ffffff", "Studio Neutral fill light must be pure neutral white");
+  assert.equal(studioPreset.rim.hex, "#ffffff", "Studio Neutral rim light must be pure neutral white");
+
+  // Verify balanced intensities across 3-point inspection rig (combined illumination <= 1.5)
+  assertClose(studioPreset.sun.intensity, 1.0, "Key light intensity must be 1.0");
+  assertClose(studioPreset.ambient.intensity, 0.4, "Ambient intensity must be 0.4");
+  assertClose(studioPreset.fill.intensity, 0.3, "Fill intensity must be 0.3");
+  assertClose(studioPreset.rim.intensity, 0.2, "Rim intensity must be 0.2");
+  const studioTotal = studioPreset.sun.intensity + studioPreset.ambient.intensity;
+  assert.ok(
+    studioTotal <= 1.5,
+    `Studio Neutral direct + ambient (${studioTotal}) must prevent highlight blowout (<= 1.5)`
+  );
+
+  // 3. Trailer Golden Hour calibrated intensities (softened to prevent color burnout)
+  const goldenPreset = LIGHTING_PRESETS["trailer-golden-hour"];
+  assert.ok(goldenPreset, "trailer-golden-hour preset must exist");
+  assertClose(goldenPreset.sun.intensity, 1.2, "Golden Hour sun intensity must be calibrated to 1.2");
+  assertClose(goldenPreset.ambient.intensity, 0.4, "Golden Hour ambient intensity must be calibrated to 0.4");
+  const goldenTotal = goldenPreset.sun.intensity + goldenPreset.ambient.intensity;
+  assert.ok(
+    goldenTotal <= 1.7,
+    `Trailer Golden Hour combined illumination (${goldenTotal}) must not exceed 1.7 (softened from 2.4)`
+  );
+
+  // 4. Tone mapping and exposure configuration on renderer
+  const mockRenderer = {
+    toneMapping: THREE.NoToneMapping,
+    toneMappingExposure: 0.5
+  };
+  configureToneMapping(mockRenderer);
+  assert.equal(
+    mockRenderer.toneMapping,
+    THREE.ACESFilmicToneMapping,
+    "Renderer must be configured with ACESFilmicToneMapping"
+  );
+  assertClose(
+    mockRenderer.toneMappingExposure,
+    1.0,
+    "Renderer toneMappingExposure must be set to 1.0"
+  );
+
+  // 5. LightingRig initialization defaults to studio-neutral and auto-configures renderer
+  const scene = new THREE.Scene();
+  const rigRenderer = {
+    toneMapping: THREE.NoToneMapping,
+    toneMappingExposure: 0.5
+  };
+  const rig = createLightingRig(scene, { renderer: rigRenderer });
+  assert.equal(rig.currentPresetId, "studio-neutral", "LightingRig must default to studio-neutral");
+  assert.equal(rigRenderer.toneMapping, THREE.ACESFilmicToneMapping, "Rig must configure tone mapping on renderer");
+  assertClose(rigRenderer.toneMappingExposure, 1.0, "Rig must configure exposure 1.0 on renderer");
+
+  // Verify pure neutral light colors applied to scene
+  assert.equal(rig.sunLight.color.getHexString(), "ffffff");
+  assert.equal(rig.ambientLight.color.getHexString(), "ffffff");
+  assert.equal(rig.fillLight.color.getHexString(), "ffffff");
+  assert.equal(rig.rimLight.color.getHexString(), "ffffff");
+  rig.dispose();
+
+  verificationResults.req5_studioInspectionLightingToneMapping = true;
+});
+
+// ============================================================================
 // SUITE SUMMARY REPORTING
 // ============================================================================
 after(() => {
@@ -795,12 +884,14 @@ after(() => {
   const req2Status = verificationResults.req2_labPbrColorSpaceIntegrity ? "PASSED" : "FAILED";
   const req3Status = verificationResults.req3_crossQuadMultiblockCulling ? "PASSED" : "FAILED";
   const req4Status = verificationResults.req4_liveSyncTouchReload ? "PASSED" : "FAILED";
+  const req5Status = verificationResults.req5_studioInspectionLightingToneMapping ? "PASSED" : "FAILED";
 
   const allPassed =
     verificationResults.req1_grassBiomeTintMatch &&
     verificationResults.req2_labPbrColorSpaceIntegrity &&
     verificationResults.req3_crossQuadMultiblockCulling &&
-    verificationResults.req4_liveSyncTouchReload;
+    verificationResults.req4_liveSyncTouchReload &&
+    verificationResults.req5_studioInspectionLightingToneMapping;
 
   console.log("\n================================================================================");
   console.log("             TEXTURESTUDIO END-TO-END VISUAL VERIFICATION SUITE                 ");
@@ -809,6 +900,7 @@ after(() => {
   console.log(`  [REQ 2] LabPBR Normals, Specular, AO & Color Space Integrity       : ${req2Status}`);
   console.log(`  [REQ 3] Cross-Quad Plant Geometry & Multiblock Culling (No Z-Fight): ${req3Status}`);
   console.log(`  [REQ 4] Live Sync SSE Invalidation & Cache-Bust Dispatch           : ${req4Status}`);
+  console.log(`  [REQ 5] Studio Inspection Lighting Calibration & ACES Tone Mapping : ${req5Status}`);
   console.log("================================================================================");
   if (allPassed) {
     console.log("  OVERALL VERIFICATION VERDICT: ALL E2E REQUIREMENTS VERIFIED SUCCESSFULLY     ");

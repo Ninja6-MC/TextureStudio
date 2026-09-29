@@ -4,6 +4,9 @@ import * as THREE from "three";
 import {
   LIGHTING_PRESETS,
   DEFAULT_LIGHTING_PRESET,
+  DEFAULT_TONE_MAPPING,
+  DEFAULT_TONE_MAPPING_EXPOSURE,
+  configureToneMapping,
   LightingRig,
   createLightingRig,
   applyLightingPreset,
@@ -33,26 +36,26 @@ test("LIGHTING_PRESETS registry exposes canonical presets and default ID", () =>
   assert.ok(LIGHTING_PRESETS["trailer-golden-hour"], "trailer-golden-hour must exist");
   assert.ok(LIGHTING_PRESETS["noon-clear"], "noon-clear must exist");
   assert.ok(LIGHTING_PRESETS["studio-neutral"], "studio-neutral must exist");
-  assert.equal(DEFAULT_LIGHTING_PRESET, "trailer-golden-hour");
+  assert.equal(DEFAULT_LIGHTING_PRESET, "studio-neutral");
 });
 
-test("Trailer Golden Hour preset defines authentic cinematic trailer lighting", () => {
+test("Trailer Golden Hour preset defines authentic cinematic trailer lighting with calibrated intensities", () => {
   const preset = LIGHTING_PRESETS["trailer-golden-hour"];
   assert.equal(preset.id, "trailer-golden-hour");
   assert.equal(preset.name, "Trailer Golden Hour");
 
-  // Warm directional amber sunlight (#ffb366, intensity 1.8, elevation ~25-30, azimuth ~45-60)
+  // Calibrated warm directional amber sunlight (#ffb366, intensity 1.2, elevation ~25-30, azimuth ~45-60)
   assert.equal(preset.sun.hex, "#ffb366");
   assert.equal(preset.sun.colorHex, 0xffb366);
-  assert.equal(preset.sun.intensity, 1.8);
+  assert.equal(preset.sun.intensity, 1.2);
   assert.ok(preset.sun.elevation >= 25 && preset.sun.elevation <= 30, "elevation should be ~25-30 deg");
   assert.ok(preset.sun.azimuth >= 45 && preset.sun.azimuth <= 60, "azimuth should be ~45-60 deg");
   assert.equal(preset.sun.castShadow, true);
 
-  // Cool blue sky ambient fill (#8ca0ba, intensity 0.6)
+  // Calibrated cool blue sky ambient fill (#8ca0ba, intensity 0.4)
   assert.equal(preset.ambient.hex, "#8ca0ba");
   assert.equal(preset.ambient.colorHex, 0x8ca0ba);
-  assert.equal(preset.ambient.intensity, 0.6);
+  assert.equal(preset.ambient.intensity, 0.4);
 });
 
 test("Noon Clear preset defines neutral sunlight and balanced ambient fill", () => {
@@ -73,34 +76,44 @@ test("Noon Clear preset defines neutral sunlight and balanced ambient fill", () 
   assert.equal(preset.ambient.intensity, 0.8);
 });
 
-test("Studio Neutral preset defines multi-angle diffuse 3-point lighting setup", () => {
+test("Studio Neutral preset defines multi-angle diffuse 3-point lighting setup for true neutral inspection", () => {
   const preset = LIGHTING_PRESETS["studio-neutral"];
   assert.equal(preset.id, "studio-neutral");
   assert.equal(preset.name, "Studio Neutral");
 
-  // Key light: directional light (warm white #fffaf0, intensity ~1.2-1.5, high front-right)
-  assert.ok(preset.sun.intensity >= 1.2 && preset.sun.intensity <= 1.5);
+  // Key light: directional light (neutral white #ffffff, intensity 1.0, high front-right)
+  assert.equal(preset.sun.hex, "#ffffff");
+  assert.equal(preset.sun.colorHex, 0xffffff);
+  assertNear(preset.sun.intensity, 1.0);
   assert.deepEqual(preset.sun.position, [5, 10, 7]);
-  assert.equal(preset.sun.hex, "#fffaf0");
 
-  // Ambient fill: ambient light (#ffffff, intensity ~0.4-0.6)
+  // Ambient fill: neutral white (#ffffff, intensity 0.4)
   assert.equal(preset.ambient.hex, "#ffffff");
-  assert.ok(preset.ambient.intensity >= 0.4 && preset.ambient.intensity <= 0.6);
+  assert.equal(preset.ambient.colorHex, 0xffffff);
+  assertNear(preset.ambient.intensity, 0.4);
 
-  // Fill light: front-left (#7da4c7, intensity ~0.4-0.6)
+  // Fill light: front-left (#ffffff, intensity 0.3)
   assert.ok(preset.fill, "fill light must be defined");
-  assert.ok(preset.fill.intensity >= 0.4 && preset.fill.intensity <= 0.6);
+  assert.equal(preset.fill.hex, "#ffffff");
+  assert.equal(preset.fill.colorHex, 0xffffff);
+  assertNear(preset.fill.intensity, 0.3);
   assert.deepEqual(preset.fill.position, [-5, 2, -5]);
 
-  // Rim/back light or bottom bounce: directional light back/bottom (#ffeedd, intensity ~0.3-0.5)
+  // Rim/back light or bottom bounce: directional light back/bottom (#ffffff, intensity 0.2)
   assert.ok(preset.rim, "rim light must be defined");
-  assert.ok(preset.rim.intensity >= 0.3 && preset.rim.intensity <= 0.5);
+  assert.equal(preset.rim.hex, "#ffffff");
+  assert.equal(preset.rim.colorHex, 0xffffff);
+  assertNear(preset.rim.intensity, 0.2);
   assert.deepEqual(preset.rim.position, [0, -8, 0]);
 
   // extraLights registry contains fill and rim lights
   assert.equal(preset.extraLights.length, 2);
   assert.equal(preset.extraLights[0].id, "fill");
+  assert.equal(preset.extraLights[0].hex, "#ffffff");
+  assertNear(preset.extraLights[0].intensity, 0.3);
   assert.equal(preset.extraLights[1].id, "rim");
+  assert.equal(preset.extraLights[1].hex, "#ffffff");
+  assertNear(preset.extraLights[1].intensity, 0.2);
 });
 
 test("getLightingPreset supports case-insensitive, whitespace-tolerant and alias lookup", () => {
@@ -354,7 +367,7 @@ test("setSunAngle updates DirectionalLight position and target cleanly", () => {
 // 4. LightingRig Class & Factory API Tests
 // -----------------------------------------------------------------------------
 
-test("createLightingRig instantiates rig with default Golden Hour preset and attaches to scene", () => {
+test("createLightingRig instantiates rig with default Studio Neutral preset and attaches to scene", () => {
   const scene = new THREE.Scene();
   const rig = createLightingRig(scene);
 
@@ -362,12 +375,12 @@ test("createLightingRig instantiates rig with default Golden Hour preset and att
   assert.strictEqual(rig.scene, scene);
   assert.ok(scene.children.includes(rig.group), "Rig group must be added to scene");
 
-  // Default preset is Trailer Golden Hour
-  assert.equal(rig.currentPresetId, "trailer-golden-hour");
-  assert.equal(rig.sunLight.color.getHexString(), "ffb366");
-  assertNear(rig.sunLight.intensity, 1.8);
-  assert.equal(rig.ambientLight.color.getHexString(), "8ca0ba");
-  assertNear(rig.ambientLight.intensity, 0.6);
+  // Default preset is Studio Neutral for accurate surface inspection
+  assert.equal(rig.currentPresetId, "studio-neutral");
+  assert.equal(rig.sunLight.color.getHexString(), "ffffff");
+  assertNear(rig.sunLight.intensity, 1.0);
+  assert.equal(rig.ambientLight.color.getHexString(), "ffffff");
+  assertNear(rig.ambientLight.intensity, 0.4);
 
   // Directional sun properties
   assert.equal(rig.sunLight.castShadow, true);
@@ -375,9 +388,13 @@ test("createLightingRig instantiates rig with default Golden Hour preset and att
   assert.equal(rig.sunLight.shadow.mapSize.height, 2048);
   assert.strictEqual(rig.keyLight, rig.sunLight, "keyLight should alias sunLight");
 
-  // Secondary lights should be hidden in 2-point Golden Hour
-  assert.equal(rig.fillLight.visible, false);
-  assert.equal(rig.rimLight.visible, false);
+  // Secondary lights should be active in 3-point Studio Neutral
+  assert.equal(rig.fillLight.visible, true);
+  assert.equal(rig.fillLight.color.getHexString(), "ffffff");
+  assertNear(rig.fillLight.intensity, 0.3);
+  assert.equal(rig.rimLight.visible, true);
+  assert.equal(rig.rimLight.color.getHexString(), "ffffff");
+  assertNear(rig.rimLight.intensity, 0.2);
 
   rig.dispose();
   assert.ok(!scene.children.includes(rig.group), "Rig group should be removed on dispose");
@@ -412,25 +429,25 @@ test("LightingRig switches presets dynamically without light duplication or memo
   rig.setPreset("studio-neutral");
   assert.equal(rig.currentPresetId, "studio-neutral");
 
-  // Key light: #fffaf0, intensity 1.5, position [5, 10, 7]
-  assert.equal(rig.sunLight.color.getHexString(), "fffaf0");
-  assertNear(rig.sunLight.intensity, 1.5);
+  // Key light: neutral white #ffffff, intensity 1.0, position [5, 10, 7]
+  assert.equal(rig.sunLight.color.getHexString(), "ffffff");
+  assertNear(rig.sunLight.intensity, 1.0);
   assert.deepEqual([rig.sunLight.position.x, rig.sunLight.position.y, rig.sunLight.position.z], [5, 10, 7]);
 
-  // Ambient: #ffffff, intensity 0.5
+  // Ambient: #ffffff, intensity 0.4
   assert.equal(rig.ambientLight.color.getHexString(), "ffffff");
-  assertNear(rig.ambientLight.intensity, 0.5);
+  assertNear(rig.ambientLight.intensity, 0.4);
 
-  // Fill light: active, #7da4c7, intensity 0.5, position [-5, 2, -5]
+  // Fill light: active, #ffffff, intensity 0.3, position [-5, 2, -5]
   assert.equal(rig.fillLight.visible, true);
-  assert.equal(rig.fillLight.color.getHexString(), "7da4c7");
-  assertNear(rig.fillLight.intensity, 0.5);
+  assert.equal(rig.fillLight.color.getHexString(), "ffffff");
+  assertNear(rig.fillLight.intensity, 0.3);
   assert.deepEqual([rig.fillLight.position.x, rig.fillLight.position.y, rig.fillLight.position.z], [-5, 2, -5]);
 
-  // Rim light: active, #ffeedd, intensity 0.4, position [0, -8, 0]
+  // Rim light: active, #ffffff, intensity 0.2, position [0, -8, 0]
   assert.equal(rig.rimLight.visible, true);
-  assert.equal(rig.rimLight.color.getHexString(), "ffeedd");
-  assertNear(rig.rimLight.intensity, 0.4);
+  assert.equal(rig.rimLight.color.getHexString(), "ffffff");
+  assertNear(rig.rimLight.intensity, 0.2);
   assert.deepEqual([rig.rimLight.position.x, rig.rimLight.position.y, rig.rimLight.position.z], [0, -8, 0]);
 
   // 2. Switch to Noon Clear
@@ -454,9 +471,9 @@ test("LightingRig switches presets dynamically without light duplication or memo
   rig.setPreset("trailer-golden-hour");
   assert.equal(rig.currentPresetId, "trailer-golden-hour");
   assert.equal(rig.sunLight.color.getHexString(), "ffb366");
-  assertNear(rig.sunLight.intensity, 1.8);
+  assertNear(rig.sunLight.intensity, 1.2);
   assert.equal(rig.ambientLight.color.getHexString(), "8ca0ba");
-  assertNear(rig.ambientLight.intensity, 0.6);
+  assertNear(rig.ambientLight.intensity, 0.4);
   assert.equal(rig.fillLight.visible, false);
   assert.equal(rig.rimLight.visible, false);
 
@@ -522,7 +539,7 @@ test("applyLightingPreset configures scene, LightingRig, and light dictionaries"
   };
 
   applyLightingPreset(customLights, "studio-neutral");
-  assert.equal(customLights.sunLight.color.getHexString(), "fffaf0");
+  assert.equal(customLights.sunLight.color.getHexString(), "ffffff");
   assert.equal(customLights.ambientLight.color.getHexString(), "ffffff");
   assert.equal(customLights.fillLight.visible, true);
   assert.equal(customLights.rimLight.visible, true);
@@ -535,4 +552,70 @@ test("applyLightingPreset configures scene, LightingRig, and light dictionaries"
   assert.throws(() => applyLightingPreset(rig, "non-existent-preset"), Error);
 
   rig.dispose();
+});
+
+// -----------------------------------------------------------------------------
+// 6. Tone Mapping & Calibrated Color Inspection Tests (Issue #49)
+// -----------------------------------------------------------------------------
+
+test("configureToneMapping sets ACESFilmicToneMapping and exposure 1.0 on renderer", () => {
+  const mockRenderer = {
+    toneMapping: THREE.NoToneMapping,
+    toneMappingExposure: 0.5
+  };
+
+  const configured = configureToneMapping(mockRenderer);
+  assert.strictEqual(configured, mockRenderer);
+  assert.equal(mockRenderer.toneMapping, THREE.ACESFilmicToneMapping);
+  assert.equal(mockRenderer.toneMappingExposure, 1.0);
+  assert.equal(DEFAULT_TONE_MAPPING, THREE.ACESFilmicToneMapping);
+  assert.equal(DEFAULT_TONE_MAPPING_EXPOSURE, 1.0);
+});
+
+test("configureToneMapping supports custom tone mapping and exposure options", () => {
+  const mockRenderer = {
+    toneMapping: THREE.NoToneMapping,
+    toneMappingExposure: 1.0
+  };
+
+  // AgX tone mapping test if available, or custom tone mapping enum
+  const targetToneMapping = THREE.AgXToneMapping ?? THREE.ACESFilmicToneMapping;
+  configureToneMapping(mockRenderer, {
+    toneMapping: targetToneMapping,
+    exposure: 1.25
+  });
+
+  assert.equal(mockRenderer.toneMapping, targetToneMapping);
+  assert.equal(mockRenderer.toneMappingExposure, 1.25);
+});
+
+test("LightingRig accepts renderer option and automatically configures tone mapping", () => {
+  const scene = new THREE.Scene();
+  const mockRenderer = {
+    toneMapping: THREE.NoToneMapping,
+    toneMappingExposure: 0.5
+  };
+
+  const rig = createLightingRig(scene, { renderer: mockRenderer });
+  assert.equal(mockRenderer.toneMapping, THREE.ACESFilmicToneMapping);
+  assert.equal(mockRenderer.toneMappingExposure, 1.0);
+  rig.dispose();
+});
+
+test("Calibrated light intensities prevent highlight blowout and preserve texture hue", () => {
+  // 1. Studio Neutral calibration: Key 1.0 + Ambient 0.4 = 1.4 combined illumination
+  const studioPreset = LIGHTING_PRESETS["studio-neutral"];
+  const studioTotal = studioPreset.sun.intensity + studioPreset.ambient.intensity;
+  assert.ok(studioTotal <= 1.5, `Studio Neutral combined illumination (${studioTotal}) should not exceed 1.5`);
+  assert.equal(studioPreset.sun.hex, "#ffffff", "Studio Neutral key light must be pure white for inspection");
+  assert.equal(studioPreset.ambient.hex, "#ffffff", "Studio Neutral ambient light must be pure white for inspection");
+  assert.equal(studioPreset.fill.hex, "#ffffff", "Studio Neutral fill light must be pure white to prevent blue hue shift");
+  assert.equal(studioPreset.rim.hex, "#ffffff", "Studio Neutral rim light must be pure white to prevent warm hue shift");
+
+  // 2. Trailer Golden Hour calibration: Sun 1.2 + Ambient 0.4 = 1.6 combined illumination (softened from 2.4)
+  const goldenPreset = LIGHTING_PRESETS["trailer-golden-hour"];
+  const goldenTotal = goldenPreset.sun.intensity + goldenPreset.ambient.intensity;
+  assert.ok(goldenTotal <= 1.7, `Trailer Golden Hour combined illumination (${goldenTotal}) should not exceed 1.7`);
+  assert.ok(goldenPreset.sun.intensity <= 1.3, "Sunlight intensity must be softened to prevent specular highlight burnout");
+  assert.ok(goldenPreset.ambient.intensity <= 0.5, "Ambient intensity must be softened to preserve shadow contrast");
 });
