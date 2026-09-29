@@ -1005,7 +1005,7 @@ class TextureStudioApp {
     loaded = loaded.map((tex) => tex || validTex);
 
     const biomeTint = getBiomeTint(this.currentBiome, "grass");
-    const biomeColor = new THREE.Color(biomeTint[0], biomeTint[1], biomeTint[2]);
+    const biomeColor = new THREE.Color().setRGB(biomeTint[0], biomeTint[1], biomeTint[2], THREE.SRGBColorSpace);
 
     return loaded.map((tex, faceIdx) => {
       const shouldTintTop = shouldApplyGrassTint(blockDef.id, faceIdx);
@@ -1139,7 +1139,7 @@ class TextureStudioApp {
       const normId = (blockDef.id || "").replace(/^minecraft:/, "").toLowerCase();
       const needsBiomeTint = normId.includes("grass") || normId.includes("fern");
       const biomeTint = getBiomeTint(this.currentBiome, "grass");
-      const tintColor = needsBiomeTint ? new THREE.Color(biomeTint[0], biomeTint[1], biomeTint[2]) : new THREE.Color(0xffffff);
+      const tintColor = needsBiomeTint ? new THREE.Color().setRGB(biomeTint[0], biomeTint[1], biomeTint[2], THREE.SRGBColorSpace) : new THREE.Color(0xffffff);
 
       const mat = createLabPBRMaterial({
         map: tex,
@@ -1262,7 +1262,7 @@ class TextureStudioApp {
         const normId = (bDef.id || "").replace(/^minecraft:/, "").toLowerCase();
         const needsBiomeTint = normId.includes("grass") || normId.includes("fern");
         const biomeTint = getBiomeTint(this.currentBiome, "grass");
-        const tintColor = needsBiomeTint ? new THREE.Color(biomeTint[0], biomeTint[1], biomeTint[2]) : new THREE.Color(0xffffff);
+        const tintColor = needsBiomeTint ? new THREE.Color().setRGB(biomeTint[0], biomeTint[1], biomeTint[2], THREE.SRGBColorSpace) : new THREE.Color(0xffffff);
 
         const mat = createLabPBRMaterial({
           map: tex,

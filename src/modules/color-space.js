@@ -63,3 +63,25 @@ export function configureTextureColorSpace(texture, textureRole) {
 
   return texture;
 }
+
+/**
+ * Converts a normalized sRGB color channel [0.0, 1.0] to Linear-sRGB [0.0, 1.0].
+ * Implements the standard IEC 61966-2-1 / Three.js SRGBToLinear transfer function.
+ *
+ * @param {number} c - sRGB channel value in [0, 1]
+ * @returns {number} Linear-sRGB channel value in [0, 1]
+ */
+export function srgbToLinear(c) {
+  return (c < 0.04045) ? c * 0.0773993808 : Math.pow(c * 0.9478672986 + 0.0521327014, 2.4);
+}
+
+/**
+ * Converts a normalized Linear-sRGB color channel [0.0, 1.0] to sRGB [0.0, 1.0].
+ * Implements the standard IEC 61966-2-1 / Three.js LinearToSRGB transfer function.
+ *
+ * @param {number} c - Linear-sRGB channel value in [0, 1]
+ * @returns {number} sRGB channel value in [0, 1]
+ */
+export function linearToSrgb(c) {
+  return (c < 0.0031308) ? c * 12.92 : 1.055 * Math.pow(Math.max(0, c), 0.41666) - 0.055;
+}

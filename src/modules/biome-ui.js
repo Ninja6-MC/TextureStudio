@@ -11,6 +11,10 @@ import {
   getBiomeData,
   rgbToHex
 } from "./biome-engine.js";
+import {
+  srgbToLinear,
+  linearToSrgb
+} from "./color-space.js";
 
 // Standard preset biomes for the TextureStudio UI selector
 export const BIOME_PRESETS = Object.freeze([
@@ -104,17 +108,40 @@ export function shouldCompositeSideOverlay(blockId, hasSideOverlay, showOverlays
 /**
  * Tints a grayscale RGBA buffer (Uint8Array, Uint8ClampedArray, or Buffer) in-place
  * by multiplying RGB channels by normalized tint multipliers [r, g, b].
+ * Supports linear-light math when options.linear is true.
  *
  * @param {Uint8Array|Uint8ClampedArray|Buffer} rgbaBuffer
  * @param {[number, number, number]} tintRgb - Normalized [r, g, b] float multipliers
+ * @param {object|boolean} [options={}] - Options or boolean flag for linear mode
  * @returns {Uint8Array|Uint8ClampedArray|Buffer}
  */
-export function tintGrayscaleBuffer(rgbaBuffer, tintRgb) {
+export function tintGrayscaleBuffer(rgbaBuffer, tintRgb, options = {}) {
   if (!rgbaBuffer || !Array.isArray(tintRgb) || tintRgb.length < 3) {
     return rgbaBuffer;
   }
 
+  const { linear = false } = typeof options === "boolean" ? { linear: options } : options;
   const [tr, tg, tb] = tintRgb;
+
+  if (linear) {
+    const tintLinR = srgbToLinear(tr);
+    const tintLinG = srgbToLinear(tg);
+    const tintLinB = srgbToLinear(tb);
+
+    for (let i = 0; i < rgbaBuffer.length; i += 4) {
+      if (rgbaBuffer[i + 3] > 0) {
+        const linR = srgbToLinear(rgbaBuffer[i] / 255) * tintLinR;
+        const linG = srgbToLinear(rgbaBuffer[i + 1] / 255) * tintLinG;
+        const linB = srgbToLinear(rgbaBuffer[i + 2] / 255) * tintLinB;
+
+        rgbaBuffer[i] = Math.min(255, Math.max(0, Math.round(linearToSrgb(linR) * 255)));
+        rgbaBuffer[i + 1] = Math.min(255, Math.max(0, Math.round(linearToSrgb(linG) * 255)));
+        rgbaBuffer[i + 2] = Math.min(255, Math.max(0, Math.round(linearToSrgb(linB) * 255)));
+      }
+    }
+    return rgbaBuffer;
+  }
+
   for (let i = 0; i < rgbaBuffer.length; i += 4) {
     if (rgbaBuffer[i + 3] > 0) {
       rgbaBuffer[i] = Math.min(255, Math.round(rgbaBuffer[i] * tr));
@@ -129,6 +156,7 @@ export function tintGrayscaleBuffer(rgbaBuffer, tintRgb) {
 /**
  * Composites a tinted grass side overlay onto a base dirt texture buffer.
  * Performs alpha blending: Result = (Overlay_Tinted * alpha) + (Dirt * (1 - alpha)).
+ * Harmonizes overlay tinting using linear-light multiplication matching Three.js SRGBColorSpace.
  *
  * @param {Uint8Array|Uint8ClampedArray|Buffer} baseDirtRgba
  * @param {Uint8Array|Uint8ClampedArray|Buffer} overlayRgba
@@ -143,6 +171,9 @@ export function compositeGrassSideBuffers(baseDirtRgba, overlayRgba, tintRgb, wi
   const output = new Uint8Array(byteLength);
 
   const [tr, tg, tb] = tintRgb || [1.0, 1.0, 1.0];
+  const tintLinR = srgbToLinear(tr);
+  const tintLinG = srgbToLinear(tg);
+  const tintLinB = srgbToLinear(tb);
 
   for (let i = 0; i < byteLength; i += 4) {
     const dirtR = baseDirtRgba ? baseDirtRgba[i] : 0;
@@ -157,22 +188,33 @@ export function compositeGrassSideBuffers(baseDirtRgba, overlayRgba, tintRgb, wi
       output[i + 1] = dirtG;
       output[i + 2] = dirtB;
       output[i + 3] = dirtA;
-    } else if (overA === 255) {
-      output[i] = Math.min(255, Math.round(overlayRgba[i] * tr));
-      output[i + 1] = Math.min(255, Math.round(overlayRgba[i + 1] * tg));
-      output[i + 2] = Math.min(255, Math.round(overlayRgba[i + 2] * tb));
-      output[i + 3] = 255;
     } else {
-      const alpha = overA / 255;
-      const invAlpha = 1 - alpha;
-      const tintedOverR = overlayRgba[i] * tr;
-      const tintedOverG = overlayRgba[i + 1] * tg;
-      const tintedOverB = overlayRgba[i + 2] * tb;
+      const overLinR = srgbToLinear(overlayRgba[i] / 255);
+      const overLinG = srgbToLinear(overlayRgba[i + 1] / 255);
+      const overLinB = srgbToLinear(overlayRgba[i + 2] / 255);
 
-      output[i] = Math.min(255, Math.round(tintedOverR * alpha + dirtR * invAlpha));
-      output[i + 1] = Math.min(255, Math.round(tintedOverG * alpha + dirtG * invAlpha));
-      output[i + 2] = Math.min(255, Math.round(tintedOverB * alpha + dirtB * invAlpha));
-      output[i + 3] = Math.min(255, Math.round(overA + dirtA * invAlpha));
+      const tintedLinR = overLinR * tintLinR;
+      const tintedLinG = overLinG * tintLinG;
+      const tintedLinB = overLinB * tintLinB;
+
+      const tintedByteR = Math.min(255, Math.max(0, Math.round(linearToSrgb(tintedLinR) * 255)));
+      const tintedByteG = Math.min(255, Math.max(0, Math.round(linearToSrgb(tintedLinG) * 255)));
+      const tintedByteB = Math.min(255, Math.max(0, Math.round(linearToSrgb(tintedLinB) * 255)));
+
+      if (overA === 255) {
+        output[i] = tintedByteR;
+        output[i + 1] = tintedByteG;
+        output[i + 2] = tintedByteB;
+        output[i + 3] = 255;
+      } else {
+        const alpha = overA / 255;
+        const invAlpha = 1 - alpha;
+
+        output[i] = Math.min(255, Math.round(tintedByteR * alpha + dirtR * invAlpha));
+        output[i + 1] = Math.min(255, Math.round(tintedByteG * alpha + dirtG * invAlpha));
+        output[i + 2] = Math.min(255, Math.round(tintedByteB * alpha + dirtB * invAlpha));
+        output[i + 3] = Math.min(255, Math.round(overA + dirtA * invAlpha));
+      }
     }
   }
 

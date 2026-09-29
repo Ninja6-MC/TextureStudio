@@ -264,8 +264,8 @@ test("Requirement 1: Grass block top and side overhang match across all 7 canoni
       }
     }
 
-    // 4. Apply top face tinting
-    tintGrayscaleBuffer(topBuffer, tint);
+    // 4. Apply top face tinting (harmonized linear pipeline)
+    tintGrayscaleBuffer(topBuffer, tint, { linear: true });
 
     // 5. Composite side overlay onto dirt base
     const compositedSide = compositeGrassSideBuffers(dirtBuffer, overlayBuffer, tint, width, height);
