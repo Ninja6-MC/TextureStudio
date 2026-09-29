@@ -4,7 +4,9 @@ import {
   BIOME_PRESETS,
   getBiomeSwatch,
   formatBiomeCoordinates,
+  getBlockTintCategory,
   shouldApplyGrassTint,
+  shouldApplyFoliageTint,
   shouldCompositeSideOverlay,
   tintGrayscaleBuffer,
   compositeGrassSideBuffers,
@@ -55,6 +57,48 @@ test("getBiomeSwatch returns correct hex, normalized rgb, and coordinates", () =
 test("formatBiomeCoordinates formats climate and pixel positions clearly", () => {
   const formatted = formatBiomeCoordinates("plains");
   assert.match(formatted, /^T: 0\.80, H: 0\.32 \(x: 51, y: 173\)$/);
+});
+
+test("getBlockTintCategory categorizes blocks into grass, foliage, or null", () => {
+  assert.equal(getBlockTintCategory("grass_block"), "grass");
+  assert.equal(getBlockTintCategory("minecraft:grass_block"), "grass");
+  assert.equal(getBlockTintCategory("short_grass"), "grass");
+  assert.equal(getBlockTintCategory("tall_grass"), "grass");
+  assert.equal(getBlockTintCategory("fern"), "grass");
+  assert.equal(getBlockTintCategory("large_fern"), "grass");
+
+  assert.equal(getBlockTintCategory("oak_leaves"), "foliage");
+  assert.equal(getBlockTintCategory("minecraft:oak_leaves"), "foliage");
+  assert.equal(getBlockTintCategory("jungle_leaves"), "foliage");
+  assert.equal(getBlockTintCategory("birch_leaves"), "foliage");
+  assert.equal(getBlockTintCategory("spruce_leaves"), "foliage");
+  assert.equal(getBlockTintCategory("acacia_leaves"), "foliage");
+  assert.equal(getBlockTintCategory("dark_oak_leaves"), "foliage");
+  assert.equal(getBlockTintCategory("vine"), "foliage");
+
+  assert.equal(getBlockTintCategory("stone"), null);
+  assert.equal(getBlockTintCategory("dirt"), null);
+  assert.equal(getBlockTintCategory("glass"), null);
+  assert.equal(getBlockTintCategory(null), null);
+  assert.equal(getBlockTintCategory(undefined), null);
+  assert.equal(getBlockTintCategory(42), null);
+});
+
+test("shouldApplyFoliageTint enables tinting across all 6 faces for foliage blocks", () => {
+  for (let faceIdx = 0; faceIdx < 6; faceIdx++) {
+    assert.equal(shouldApplyFoliageTint("oak_leaves", faceIdx), true, `Face ${faceIdx} must receive foliage tint`);
+    assert.equal(shouldApplyFoliageTint("jungle_leaves", faceIdx), true);
+    assert.equal(shouldApplyFoliageTint("vine", faceIdx), true);
+  }
+  assert.equal(shouldApplyFoliageTint("oak_leaves"), true);
+  assert.equal(shouldApplyFoliageTint("oak_leaves", null), true);
+
+  assert.equal(shouldApplyFoliageTint("grass_block", 2), false);
+  assert.equal(shouldApplyFoliageTint("grass_block"), false);
+  assert.equal(shouldApplyFoliageTint("stone", 0), false);
+  assert.equal(shouldApplyFoliageTint("dirt", 2), false);
+  assert.equal(shouldApplyFoliageTint(null), false);
+  assert.equal(shouldApplyFoliageTint("oak_leaves", 6), false);
 });
 
 test("shouldApplyGrassTint enables tinting universally without isExternal gating", () => {

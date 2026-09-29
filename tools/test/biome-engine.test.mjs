@@ -184,6 +184,31 @@ test("getBiomeTint samples authentic colormap colors for standard biomes", () =>
   assert.equal(rgbToHex(...jungleFoliage), "#30bb0b");
 });
 
+test("getBiomeTint samples authentic foliage colormap colors across biomes", () => {
+  const expectedFoliage = {
+    plains: "#77ab2f",
+    forest: "#59ae30",
+    birch_forest: "#6ba941",
+    dark_forest: "#59ae30",
+    taiga: "#68a464",
+    swamp: "#6a7039",
+    badlands: "#9e814d",
+    desert: "#aea42a",
+    savanna: "#aea42a",
+    jungle: "#30bb0b",
+    snowy_plains: "#60a17b"
+  };
+
+  for (const [biomeId, expectedHex] of Object.entries(expectedFoliage)) {
+    const tint = getBiomeTint(biomeId, "foliage");
+    assert.equal(
+      rgbToHex(...tint),
+      expectedHex,
+      `Biome '${biomeId}' foliage tint must match authentic Minecraft foliage color ${expectedHex}`
+    );
+  }
+});
+
 test("getBiomeTint accepts climate object as direct input", () => {
   // Pass custom climate (T = 0.8, H = 0.4 -> Plains)
   const tint = getBiomeTint({ temperature: 0.8, humidity: 0.4 }, "grass");
