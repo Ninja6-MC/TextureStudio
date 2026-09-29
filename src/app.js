@@ -141,12 +141,12 @@ class TextureStudioApp {
     this.isPomEnabled = true;
     this.pomDepthScale = POM_DEFAULT_DEPTH_SCALE;
 
-    preloadStandardColormaps();
+    const colormapPromise = preloadStandardColormaps();
 
     this.initDOM();
     this.loadPersistedSettings();
 
-    this.loadAllSets().then(() => {
+    Promise.all([this.loadAllSets(), colormapPromise.catch(() => {})]).then(() => {
       this.initAllViewports();
       this.bindEvents();
       this.bindExportEvents();
