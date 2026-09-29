@@ -317,12 +317,45 @@ function decodePngSync(buf, zlibInstance) {
  * Buffer must contain at least 256 * 256 * 4 bytes.
  *
  * @param {string} category - 'grass' | 'foliage'
- * @param {Uint8Array|Buffer} pixelBuffer
+ * @param {Uint8Array|Uint8ClampedArray|Buffer|ImageData} pixelBuffer
+ * @param {number} [width]
+ * @param {number} [height]
  */
-export function registerColormap(category, pixelBuffer) {
+export function registerColormap(category, pixelBuffer, width, height) {
   if (typeof category !== "string" || !pixelBuffer) return;
   const key = category.trim().toLowerCase();
-  colormapBuffers.set(key, pixelBuffer);
+  const buffer = pixelBuffer.data || pixelBuffer;
+  colormapBuffers.set(key, buffer);
+}
+
+/**
+ * Checks whether an in-memory colormap pixel buffer is registered for a category.
+ *
+ * @param {string} category - 'grass' | 'foliage'
+ * @returns {boolean}
+ */
+export function hasColormap(category) {
+  if (typeof category !== "string") return false;
+  return colormapBuffers.has(category.trim().toLowerCase());
+}
+
+/**
+ * Retrieves the raw registered colormap pixel buffer for a category, if loaded.
+ *
+ * @param {string} category - 'grass' | 'foliage'
+ * @returns {Uint8Array|Uint8ClampedArray|null}
+ */
+export function getColormapBuffer(category) {
+  if (typeof category !== "string") return null;
+  return colormapBuffers.get(category.trim().toLowerCase()) || null;
+}
+
+/**
+ * Clears all registered colormap pixel buffers.
+ * Primarily used for unit testing or dynamic pack reloads.
+ */
+export function clearColormaps() {
+  colormapBuffers.clear();
 }
 
 /**
@@ -354,14 +387,251 @@ export function getColormapPixel(category, x, y) {
 }
 
 /**
- * Initializes and preloads standard vanilla grass and foliage colormaps from disk
- * when running within a Node.js runtime.
+ * Decodes a binary image payload into a rasterizable image source (ImageBitmap or HTMLImageElement).
+ *
+ * @param {Blob|ArrayBuffer} blobOrBuffer
+ * @param {string} url
+ * @param {object} [options={}]
+ * @returns {Promise<{source: ImageBitmap|HTMLImageElement, isBitmap: boolean, width: number, height: number}>}
  */
-export async function preloadStandardColormaps() {
-  if (typeof process === "undefined" || !process.versions?.node) {
-    return;
+async function decodeImageSource(blobOrBuffer, url, options = {}) {
+  const createBitmapFn = options.createImageBitmap || (typeof createImageBitmap === "function" ? createImageBitmap : null);
+  if (typeof createBitmapFn === "function") {
+    try {
+      const bitmap = await createBitmapFn(blobOrBuffer);
+      return {
+        source: bitmap,
+        isBitmap: true,
+        width: bitmap.width || COLORMAP_SIZE,
+        height: bitmap.height || COLORMAP_SIZE
+      };
+    } catch {
+      // Fallback to Image constructor
+    }
   }
 
+  const ImageCtor = options.Image || (typeof Image !== "undefined" ? Image : (typeof window !== "undefined" ? window.Image : null));
+  if (ImageCtor) {
+    let srcUrl = url;
+    let objectUrl = null;
+    if (typeof URL !== "undefined" && typeof URL.createObjectURL === "function" && typeof Blob !== "undefined" && blobOrBuffer instanceof Blob) {
+      try {
+        objectUrl = URL.createObjectURL(blobOrBuffer);
+        srcUrl = objectUrl;
+      } catch {}
+    }
+
+    try {
+      const img = await new Promise((resolve, reject) => {
+        const image = new ImageCtor();
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error(`Failed to load colormap image from ${url}`));
+        image.src = srcUrl;
+      });
+      return {
+        source: img,
+        isBitmap: false,
+        width: img.naturalWidth || img.width || COLORMAP_SIZE,
+        height: img.naturalHeight || img.height || COLORMAP_SIZE
+      };
+    } finally {
+      if (objectUrl && typeof URL.revokeObjectURL === "function") {
+        URL.revokeObjectURL(objectUrl);
+      }
+    }
+  }
+
+  throw new Error("No image decoder available (neither createImageBitmap nor Image constructor found)");
+}
+
+/**
+ * Creates a 2D rendering canvas context across OffscreenCanvas, HTMLCanvasElement, or custom factory.
+ *
+ * @param {number} width
+ * @param {number} height
+ * @param {object} [options={}]
+ * @returns {{canvas: HTMLCanvasElement|OffscreenCanvas, ctx: CanvasRenderingContext2D}}
+ */
+function createCanvasContext(width, height, options = {}) {
+  let canvas = null;
+  if (typeof options.createCanvas === "function") {
+    canvas = options.createCanvas(width, height);
+  } else if (typeof options.OffscreenCanvas === "function") {
+    canvas = new options.OffscreenCanvas(width, height);
+  } else if (typeof OffscreenCanvas !== "undefined") {
+    canvas = new OffscreenCanvas(width, height);
+  } else {
+    const doc = options.document || (typeof document !== "undefined" ? document : (typeof window !== "undefined" ? window.document : null));
+    if (doc && typeof doc.createElement === "function") {
+      canvas = doc.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+    }
+  }
+
+  if (!canvas) {
+    throw new Error("No Canvas2D or OffscreenCanvas implementation available");
+  }
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    throw new Error("Failed to acquire 2D context from canvas");
+  }
+
+  return { canvas, ctx };
+}
+
+/**
+ * Rasterizes an image source onto a 2D canvas and extracts the RGBA pixel array.
+ *
+ * @param {{source: any, isBitmap: boolean, width: number, height: number}} sourceInfo
+ * @param {object} [options={}]
+ * @returns {{data: Uint8ClampedArray, width: number, height: number}}
+ */
+function rasterizeImageSource(sourceInfo, options = {}) {
+  const { source, isBitmap, width, height } = sourceInfo;
+  try {
+    const { canvas, ctx } = createCanvasContext(width, height, options);
+    ctx.drawImage(source, 0, 0, width, height);
+    const imgData = ctx.getImageData(0, 0, width, height);
+    const data = imgData.data || imgData;
+    return { data, width, height };
+  } finally {
+    if (isBitmap && typeof source.close === "function") {
+      source.close();
+    }
+  }
+}
+
+/**
+ * Loads and rasterizes a colormap texture in browser runtime via fetch and Canvas2D,
+ * registering the resulting Uint8ClampedArray in colormapBuffers.
+ *
+ * @param {string} category - 'grass' | 'foliage'
+ * @param {string} url - URL or relative path to the colormap PNG asset
+ * @param {object} [options={}]
+ * @returns {Promise<{category: string, data: Uint8ClampedArray, width: number, height: number}>}
+ */
+export async function loadBrowserColormap(category, url, options = {}) {
+  const fetchFn = options.fetch || (typeof fetch === "function" ? fetch : null);
+  if (!fetchFn) {
+    throw new Error("No fetch implementation available");
+  }
+
+  const res = await fetchFn(url);
+  if (!res || !res.ok) {
+    const status = res ? res.status : "unknown";
+    throw new Error(`Failed to fetch colormap '${category}' from ${url} (HTTP ${status})`);
+  }
+
+  let blobOrBuffer;
+  if (typeof res.blob === "function") {
+    blobOrBuffer = await res.blob();
+  } else if (typeof res.arrayBuffer === "function") {
+    blobOrBuffer = await res.arrayBuffer();
+  } else {
+    blobOrBuffer = res;
+  }
+
+  const sourceInfo = await decodeImageSource(blobOrBuffer, url, options);
+  const rasterized = rasterizeImageSource(sourceInfo, options);
+
+  registerColormap(category, rasterized.data, rasterized.width, rasterized.height);
+
+  return {
+    category,
+    data: rasterized.data,
+    width: rasterized.width,
+    height: rasterized.height
+  };
+}
+
+/**
+ * Preloads standard vanilla grass and foliage colormaps in browser runtime via fetch and Canvas2D.
+ *
+ * @param {object} [options={}]
+ * @returns {Promise<{success: boolean, grass: boolean, foliage: boolean, error?: Error}>}
+ */
+async function preloadStandardColormapsBrowser(options = {}) {
+  let baseUrl = options.baseUrl;
+  if (!baseUrl) {
+    if (typeof import.meta !== "undefined" && import.meta.url && !import.meta.url.startsWith("file:")) {
+      try {
+        baseUrl = new URL("../assets/colormap/", import.meta.url).href;
+      } catch {}
+    }
+    if (!baseUrl) {
+      baseUrl = "src/assets/colormap/";
+    }
+  }
+  const baseNormalized = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
+
+  const grassCandidates = [
+    options.grassUrl,
+    `${baseNormalized}grass.png`,
+    "/src/assets/colormap/grass.png",
+    "src/assets/colormap/grass.png"
+  ].filter(Boolean);
+
+  const foliageCandidates = [
+    options.foliageUrl,
+    `${baseNormalized}foliage.png`,
+    "/src/assets/colormap/foliage.png",
+    "src/assets/colormap/foliage.png"
+  ].filter(Boolean);
+
+  const uniqueGrass = [...new Set(grassCandidates)];
+  const uniqueFoliage = [...new Set(foliageCandidates)];
+
+  let lastError = null;
+
+  if (!colormapBuffers.has("grass") || options.reload) {
+    let loaded = false;
+    for (const url of uniqueGrass) {
+      try {
+        await loadBrowserColormap("grass", url, options);
+        loaded = true;
+        break;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    if (!loaded && options.throwOnError) {
+      throw lastError || new Error("Failed to load grass colormap");
+    }
+  }
+
+  if (!colormapBuffers.has("foliage") || options.reload) {
+    let loaded = false;
+    for (const url of uniqueFoliage) {
+      try {
+        await loadBrowserColormap("foliage", url, options);
+        loaded = true;
+        break;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    if (!loaded && options.throwOnError) {
+      throw lastError || new Error("Failed to load foliage colormap");
+    }
+  }
+
+  return {
+    success: colormapBuffers.has("grass") && colormapBuffers.has("foliage"),
+    grass: colormapBuffers.has("grass"),
+    foliage: colormapBuffers.has("foliage"),
+    error: lastError
+  };
+}
+
+/**
+ * Preloads standard vanilla grass and foliage colormaps from disk in Node.js runtime.
+ *
+ * @param {object} [options={}]
+ * @returns {Promise<{success: boolean, grass: boolean, foliage: boolean}>}
+ */
+async function preloadStandardColormapsNode(options = {}) {
   try {
     const fs = await import("node:fs");
     const path = await import("node:path");
@@ -381,27 +651,68 @@ export async function preloadStandardColormaps() {
       const grassPath = path.join(dir, "grass.png");
       const foliagePath = path.join(dir, "foliage.png");
 
-      if (!colormapBuffers.has("grass") && fs.existsSync(grassPath)) {
+      if ((!colormapBuffers.has("grass") || options.reload) && fs.existsSync(grassPath)) {
         const decoded = decodePngSync(fs.readFileSync(grassPath), zlib);
-        registerColormap("grass", decoded.data);
+        registerColormap("grass", decoded.data, decoded.width, decoded.height);
       }
-      if (!colormapBuffers.has("foliage") && fs.existsSync(foliagePath)) {
+      if ((!colormapBuffers.has("foliage") || options.reload) && fs.existsSync(foliagePath)) {
         const decoded = decodePngSync(fs.readFileSync(foliagePath), zlib);
-        registerColormap("foliage", decoded.data);
+        registerColormap("foliage", decoded.data, decoded.width, decoded.height);
       }
 
       if (colormapBuffers.has("grass") && colormapBuffers.has("foliage")) {
         break;
       }
     }
-  } catch {
+  } catch (err) {
+    if (options.throwOnError) throw err;
     // Graceful fallback to default values in constrained environments
   }
+
+  return {
+    success: colormapBuffers.has("grass") && colormapBuffers.has("foliage"),
+    grass: colormapBuffers.has("grass"),
+    foliage: colormapBuffers.has("foliage")
+  };
+}
+
+/**
+ * Initializes and preloads standard vanilla grass and foliage colormaps.
+ *
+ * When running in Node.js, loads PNGs from disk via fs and zlib.
+ * When running in browser, fetches PNGs via fetch and rasterizes via Canvas2D.
+ *
+ * @param {object|string} [options={}] - Options or baseUrl string
+ * @returns {Promise<{success: boolean, grass: boolean, foliage: boolean, error?: Error}>}
+ */
+export async function preloadStandardColormaps(options = {}) {
+  const opts = typeof options === "string" ? { baseUrl: options } : (options || {});
+
+  const isNode = typeof process !== "undefined" && Boolean(process.versions?.node);
+  const isBrowserExplicit = Boolean(
+    opts.forceBrowser ||
+    opts.isBrowser ||
+    opts.fetch ||
+    opts.createCanvas ||
+    opts.Image ||
+    opts.createImageBitmap ||
+    opts.document
+  );
+  const isNodeExplicit = Boolean(opts.forceNode || opts.isNode);
+  const inBrowser = typeof window !== "undefined" || typeof document !== "undefined" || !isNode;
+
+  if ((inBrowser || isBrowserExplicit) && !isNodeExplicit) {
+    return preloadStandardColormapsBrowser(opts);
+  }
+
+  return preloadStandardColormapsNode(opts);
 }
 
 // Auto-initialize standard colormaps in Node.js environment
 if (typeof process !== "undefined" && process.versions?.node) {
   await preloadStandardColormaps();
+} else if (typeof window !== "undefined" || typeof document !== "undefined") {
+  preloadStandardColormaps().catch(() => {});
 }
 
 /**
