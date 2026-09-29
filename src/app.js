@@ -98,7 +98,7 @@ function buildExternalSet(pack, referenceBlocks = [], multiblocks = []) {
   const blocks = referenceBlocks.map((b) => {
     const textures = {};
     for (const [face, texPath] of Object.entries(b.textures)) {
-      const stem = texPath.replace(/^textures\//, "").replace(/\.(svg|png)$/, "");
+      const stem = texPath.replace(/^textures\/(block\/)?/, "").replace(/\.(svg|png)$/, "");
       textures[face] = `${base}/block/${stem}.png`;
     }
     if (b.id === "grass_block") {
