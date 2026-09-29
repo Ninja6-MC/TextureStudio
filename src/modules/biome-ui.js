@@ -70,6 +70,35 @@ export function formatBiomeCoordinates(biomeId) {
 }
 
 /**
+ * Categorizes a block identifier into its biome colormap tinting category.
+ *
+ * @param {string} blockId
+ * @returns {"grass"|"foliage"|null}
+ */
+export function getBlockTintCategory(blockId) {
+  if (typeof blockId !== "string") return null;
+  const id = blockId.trim().toLowerCase();
+  if (id === "grass_block" || id.includes("grass") || id.includes("fern")) return "grass";
+  if (id.includes("leaves") || id.includes("vine")) return "foliage";
+  return null;
+}
+
+/**
+ * Universal gate determining whether a block face receives foliage colormap tinting.
+ * Foliage blocks (such as oak leaves, jungle leaves, vines) receive foliage colormap
+ * tinting uniformly across all faces (or all 6 cuboid faces).
+ *
+ * @param {string} blockId
+ * @param {number|null} [faceIndex=null]
+ * @returns {boolean}
+ */
+export function shouldApplyFoliageTint(blockId, faceIndex = null) {
+  if (getBlockTintCategory(blockId) !== "foliage") return false;
+  if (faceIndex === null) return true;
+  return Number.isInteger(faceIndex) ? faceIndex >= 0 && faceIndex <= 5 : true;
+}
+
+/**
  * Universal gate determining whether a block face receives biome tinting.
  * Removes the restrictive isExternal gate so both local and external resource sets
  * receive authentic biome compositing.

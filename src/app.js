@@ -1,7 +1,16 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { preloadStandardColormaps, getBiomeTint, getBiomeData } from "./modules/biome-engine.js";
-import { BIOME_PRESETS, getBiomeSwatch, formatBiomeCoordinates, shouldApplyGrassTint, shouldCompositeSideOverlay, compositeGrassSideBuffers } from "./modules/biome-ui.js";
+import {
+  BIOME_PRESETS,
+  getBiomeSwatch,
+  formatBiomeCoordinates,
+  getBlockTintCategory,
+  shouldApplyGrassTint,
+  shouldApplyFoliageTint,
+  shouldCompositeSideOverlay,
+  compositeGrassSideBuffers
+} from "./modules/biome-ui.js";
 import { LIGHTING_PRESETS, createLightingRig, applyLightingPreset, DEFAULT_LIGHTING_PRESET } from "./modules/lighting-presets.js";
 import { applyPOM, clampDepthScale, POM_DEFAULT_DEPTH_SCALE } from "./modules/pbr-pom.js";
 import { createLabPBRMaterial, applyLabPBRShader } from "./modules/pbr-material.js";
@@ -977,23 +986,25 @@ class TextureStudioApp {
   }
 
   async getMaterialsForBlock(blockDef, isExternal = false) {
-    const fallbackTex = blockDef.textures.all || blockDef.textures.side || blockDef.textures.top || blockDef.textures.bottom;
-    const isGrassOrPath = blockDef.id === "grass_block" || blockDef.id === "dirt_path";
+    const bDef = typeof blockDef === "string" ? { id: blockDef, textures: { all: `textures/${blockDef}.svg` } } : (blockDef || {});
+    const blockId = bDef.id || (typeof blockDef === "string" ? blockDef : "");
+    const fallbackTex = bDef.textures?.all || bDef.textures?.side || bDef.textures?.top || bDef.textures?.bottom;
+    const isGrassOrPath = blockId === "grass_block" || blockId === "dirt_path";
     const sideTex = (!this.showOverlays && isGrassOrPath)
-      ? (blockDef.textures.bottom || "textures/dirt.svg")
-      : (blockDef.textures.side || fallbackTex);
+      ? (bDef.textures?.bottom || "textures/dirt.svg")
+      : (bDef.textures?.side || fallbackTex);
 
-    const canCompositeSide = shouldCompositeSideOverlay(blockDef.id, blockDef.textures.side_overlay, this.showOverlays);
+    const canCompositeSide = shouldCompositeSideOverlay(blockId, bDef.textures?.side_overlay, this.showOverlays);
 
     const sidePromise = canCompositeSide
-      ? this.loadCompositedGrassSideTexture(sideTex, blockDef.textures.side_overlay)
+      ? this.loadCompositedGrassSideTexture(sideTex, bDef.textures?.side_overlay)
       : this.loadTexture(sideTex);
 
     let loaded = await Promise.all([
       sidePromise,
       sidePromise,
-      this.loadTexture(blockDef.textures.top || fallbackTex),
-      this.loadTexture(blockDef.textures.bottom || fallbackTex),
+      this.loadTexture(bDef.textures?.top || fallbackTex),
+      this.loadTexture(bDef.textures?.bottom || fallbackTex),
       sidePromise,
       sidePromise
     ]);
@@ -1006,15 +1017,30 @@ class TextureStudioApp {
 
     loaded = loaded.map((tex) => tex || validTex);
 
-    const biomeTint = getBiomeTint(this.currentBiome, "grass");
-    const biomeColor = new THREE.Color().setRGB(biomeTint[0], biomeTint[1], biomeTint[2], THREE.SRGBColorSpace);
+    const tintCategory = getBlockTintCategory(blockId);
+    let foliageColor = null;
+    let grassColor = null;
+
+    if (tintCategory === "foliage" || shouldApplyFoliageTint(blockId)) {
+      const tintRgb = getBiomeTint(this.currentBiome, "foliage");
+      foliageColor = new THREE.Color().setRGB(tintRgb[0], tintRgb[1], tintRgb[2], THREE.SRGBColorSpace);
+    }
+    if (tintCategory === "grass" || shouldApplyGrassTint(blockId)) {
+      const tintRgb = getBiomeTint(this.currentBiome, "grass");
+      grassColor = new THREE.Color().setRGB(tintRgb[0], tintRgb[1], tintRgb[2], THREE.SRGBColorSpace);
+    }
 
     return loaded.map((tex, faceIdx) => {
-      const shouldTintTop = shouldApplyGrassTint(blockDef.id, faceIdx);
+      let faceColor = 0xffffff;
+      if (foliageColor && shouldApplyFoliageTint(blockId, faceIdx)) {
+        faceColor = foliageColor;
+      } else if (grassColor && shouldApplyGrassTint(blockId, faceIdx)) {
+        faceColor = grassColor;
+      }
 
       return createLabPBRMaterial({
         map: tex,
-        color: shouldTintTop ? biomeColor : 0xffffff,
+        color: faceColor,
         roughness: 0.8,
         metalness: 0.1,
         wireframe: this.isWireframe,
@@ -1139,9 +1165,17 @@ class TextureStudioApp {
       }
       const geo = createCrossQuadGeometry({ center: true, three: THREE });
       const normId = (blockDef.id || "").replace(/^minecraft:/, "").toLowerCase();
-      const needsBiomeTint = normId.includes("grass") || normId.includes("fern");
-      const biomeTint = getBiomeTint(this.currentBiome, "grass");
-      const tintColor = needsBiomeTint ? new THREE.Color().setRGB(biomeTint[0], biomeTint[1], biomeTint[2], THREE.SRGBColorSpace) : new THREE.Color(0xffffff);
+      const tintCategory = getBlockTintCategory(blockDef.id);
+      let tintColor;
+      if (tintCategory === "foliage") {
+        const tintRgb = getBiomeTint(this.currentBiome, "foliage");
+        tintColor = new THREE.Color().setRGB(tintRgb[0], tintRgb[1], tintRgb[2], THREE.SRGBColorSpace);
+      } else if (tintCategory === "grass" || normId.includes("grass") || normId.includes("fern")) {
+        const tintRgb = getBiomeTint(this.currentBiome, "grass");
+        tintColor = new THREE.Color().setRGB(tintRgb[0], tintRgb[1], tintRgb[2], THREE.SRGBColorSpace);
+      } else {
+        tintColor = new THREE.Color(0xffffff);
+      }
 
       const mat = createLabPBRMaterial({
         map: tex,
@@ -1262,9 +1296,17 @@ class TextureStudioApp {
         }
         const geo = createCrossQuadGeometry({ center: true, three: THREE });
         const normId = (bDef.id || "").replace(/^minecraft:/, "").toLowerCase();
-        const needsBiomeTint = normId.includes("grass") || normId.includes("fern");
-        const biomeTint = getBiomeTint(this.currentBiome, "grass");
-        const tintColor = needsBiomeTint ? new THREE.Color().setRGB(biomeTint[0], biomeTint[1], biomeTint[2], THREE.SRGBColorSpace) : new THREE.Color(0xffffff);
+        const tintCategory = getBlockTintCategory(bDef.id);
+        let tintColor;
+        if (tintCategory === "foliage") {
+          const tintRgb = getBiomeTint(this.currentBiome, "foliage");
+          tintColor = new THREE.Color().setRGB(tintRgb[0], tintRgb[1], tintRgb[2], THREE.SRGBColorSpace);
+        } else if (tintCategory === "grass" || normId.includes("grass") || normId.includes("fern")) {
+          const tintRgb = getBiomeTint(this.currentBiome, "grass");
+          tintColor = new THREE.Color().setRGB(tintRgb[0], tintRgb[1], tintRgb[2], THREE.SRGBColorSpace);
+        } else {
+          tintColor = new THREE.Color(0xffffff);
+        }
 
         const mat = createLabPBRMaterial({
           map: tex,
@@ -1353,6 +1395,9 @@ TextureStudioApp.getBiomeSwatch = getBiomeSwatch;
 TextureStudioApp.formatBiomeCoordinates = formatBiomeCoordinates;
 TextureStudioApp.applyPOM = applyPOM;
 TextureStudioApp.applyLabPBRShader = applyLabPBRShader;
+TextureStudioApp.getBlockTintCategory = getBlockTintCategory;
+TextureStudioApp.shouldApplyFoliageTint = shouldApplyFoliageTint;
+TextureStudioApp.shouldApplyGrassTint = shouldApplyGrassTint;
 
 window.addEventListener("DOMContentLoaded", () => {
   new TextureStudioApp();

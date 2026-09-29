@@ -12,7 +12,9 @@ import {
 } from "../src/modules/biome-engine.js";
 
 import {
+  getBlockTintCategory,
   shouldApplyGrassTint,
+  shouldApplyFoliageTint,
   shouldCompositeSideOverlay,
   tintGrayscaleBuffer,
   compositeGrassSideBuffers,
@@ -170,6 +172,42 @@ test("Requirement 1: Grass block top and side overhang match across all 7 canoni
   const allTestedBiomes = [...canonicalBiomes, ...additionalBiomes];
 
   // 1. Assert tinting and overlay predicate rules
+  assert.equal(getBlockTintCategory("grass_block"), "grass", "grass_block category must be grass");
+  assert.equal(getBlockTintCategory("short_grass"), "grass", "short_grass category must be grass");
+  assert.equal(getBlockTintCategory("fern"), "grass", "fern category must be grass");
+  assert.equal(getBlockTintCategory("oak_leaves"), "foliage", "oak_leaves category must be foliage");
+  assert.equal(getBlockTintCategory("jungle_leaves"), "foliage", "jungle_leaves category must be foliage");
+  assert.equal(getBlockTintCategory("vine"), "foliage", "vine category must be foliage");
+  assert.equal(getBlockTintCategory("stone"), null, "stone category must be null");
+
+  for (let faceIdx = 0; faceIdx < 6; faceIdx++) {
+    assert.equal(
+      shouldApplyFoliageTint("oak_leaves", faceIdx),
+      true,
+      `Oak leaves face index ${faceIdx} must receive foliage tint`
+    );
+    assert.equal(
+      shouldApplyFoliageTint("jungle_leaves", faceIdx),
+      true,
+      `Jungle leaves face index ${faceIdx} must receive foliage tint`
+    );
+  }
+  assert.equal(
+    shouldApplyFoliageTint("oak_leaves"),
+    true,
+    "Oak leaves default face must receive foliage tint"
+  );
+  assert.equal(
+    shouldApplyFoliageTint("grass_block", 2),
+    false,
+    "Grass block must not receive foliage tint"
+  );
+  assert.equal(
+    shouldApplyFoliageTint("stone", 2),
+    false,
+    "Stone must not receive foliage tint"
+  );
+
   assert.equal(
     shouldApplyGrassTint("grass_block", 2),
     true,
@@ -230,6 +268,29 @@ test("Requirement 1: Grass block top and side overhang match across all 7 canoni
     }
     if (biomeId === "plains") {
       assert.equal(rgbToHex(...tint), "#91bd59", "Plains grass tint must sample #91bd59");
+    }
+
+    // Verify foliage tinting across biomes from foliage.png and overrides
+    const foliageTint = getBiomeTint(biomeId, "foliage");
+    assert.ok(Array.isArray(foliageTint) && foliageTint.length === 3, `Biome ${biomeId} foliage tint must be [r, g, b] array`);
+    assert.ok(foliageTint[0] >= 0 && foliageTint[0] <= 1, `Biome ${biomeId} foliage red out of bounds`);
+    assert.ok(foliageTint[1] >= 0 && foliageTint[1] <= 1, `Biome ${biomeId} foliage green out of bounds`);
+    assert.ok(foliageTint[2] >= 0 && foliageTint[2] <= 1, `Biome ${biomeId} foliage blue out of bounds`);
+
+    if (biomeId === "badlands") {
+      assert.equal(rgbToHex(...foliageTint), "#9e814d", "Badlands foliage tint must match Java override #9e814d");
+    }
+    if (biomeId === "swamp") {
+      assert.equal(rgbToHex(...foliageTint), "#6a7039", "Swamp foliage tint must match Java override #6a7039");
+    }
+    if (biomeId === "plains") {
+      assert.equal(rgbToHex(...foliageTint), "#77ab2f", "Plains foliage tint must sample #77ab2f");
+    }
+    if (biomeId === "forest") {
+      assert.equal(rgbToHex(...foliageTint), "#59ae30", "Forest foliage tint must sample #59ae30");
+    }
+    if (biomeId === "jungle") {
+      assert.equal(rgbToHex(...foliageTint), "#30bb0b", "Jungle foliage tint must sample #30bb0b");
     }
 
     // 3. Construct 4x4 top face grayscale buffer and side buffers
